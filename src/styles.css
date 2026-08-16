@@ -147,6 +147,7 @@ body {
 .onb-title { font-size: 26px; text-align: center; margin: 4px 0 10px; color: var(--ink); }
 .onb-text { color: var(--muted); text-align: center; line-height: 1.5; margin-bottom: 22px; }
 .onb-step { text-align: center; color: var(--brand); font-weight: 600; font-size: 13px; margin-bottom: 6px; }
+.center { text-align: center; }
 .field-label.center, .link.center { text-align: center; width: 100%; }
 .link.center { margin-top: 10px; }
 

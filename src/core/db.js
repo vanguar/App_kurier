@@ -68,6 +68,14 @@ export async function saveSettings(patch) {
   return next;
 }
 
+// Reset settings to factory defaults (restores preset depot, theme, etc.).
+// Does not touch delivery points or the address index.
+export async function resetSettings() {
+  const d = await db();
+  await d.delete('settings', 'app');
+  return getSettings();
+}
+
 // ---- points ----
 export async function getPoints() {
   const d = await db();

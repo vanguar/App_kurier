@@ -2,13 +2,13 @@ import { el, clear, toast } from './dom.js';
 import { t, setLang, getLang, resolveInitialLang, LANGS } from '../i18n/index.js';
 import {
   getSettings, saveSettings, getPoints, putPoint, deletePoint, clearPoints,
-  loadAddressIndex, indexCount,
+  loadAddressIndex, indexCount, resetSettings,
 } from '../core/db.js';
 import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts } from '../core/matching.js';
 import { computeRoute } from '../core/route.js';
-import { recognize, splitIntoAddressBlocks } from '../ocr/ocr.js';
+import { recognize, splitIntoAddressBlocks, warmUp } from '../ocr/ocr.js';
 
 let settings = null;
 const app = document.getElementById('app');
@@ -325,6 +325,25 @@ async function renderSettings(main) {
   ]);
   main.appendChild(idxCard);
 
+  // Reset to factory defaults
+  main.appendChild(el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('settings_reset') }),
+    el('p', { class: 'hint', text: t('settings_reset_hint') }),
+    el('button', {
+      class: 'btn', text: t('settings_reset'),
+      onclick: async () => {
+        if (confirm(t('settings_reset_confirm'))) {
+          settings = await resetSettings();
+          setLang(resolveInitialLang(settings.language));
+          applyTheme(settings.theme);
+          toast(t('settings_saved'));
+          location.hash = '';
+          render();
+        }
+      },
+    }),
+  ]));
+
   // Danger zone
   const danger = el('div', { class: 'card danger' }, [
     el('label', { class: 'field-label', text: t('settings_danger') }),
@@ -340,6 +359,9 @@ async function renderSettings(main) {
     }),
   ]);
   main.appendChild(danger);
+
+  // Build stamp — lets you confirm the installed app updated to the latest version.
+  main.appendChild(el('p', { class: 'hint center', text: `${t('settings_version')}: ${__BUILD__}` }));
 }
 
 // ---------- Import / Scan ----------
@@ -347,6 +369,16 @@ let importState = { type: 'parcel', rows: [] };
 
 async function renderImport(main) {
   main.appendChild(section(t('import_title')));
+
+  // Warm up the OCR engine as soon as the Scan screen opens, so the model
+  // download/init is not paid mid-scan. Progress is reflected in the hint below.
+  warmUp((phase, p) => {
+    if (importState.rows.length) return; // don't clobber the review view
+    const el2 = document.getElementById('ocr-status');
+    if (!el2) return;
+    if (phase === 'loading' && p < 1) el2.textContent = t('import_loading_engine', { p: Math.round(p * 100) });
+    else if (phase === 'loading') el2.textContent = t('import_engine_ready');
+  });
 
   // Type selector
   const typeSel = el('div', { class: 'card' }, [
@@ -364,15 +396,17 @@ async function renderImport(main) {
 
   // Photo input
   const photo = el('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden' });
-  const progress = el('p', { class: 'hint', text: t('import_photo_hint') });
+  const progress = el('p', { class: 'hint', id: 'ocr-status', text: t('import_photo_hint') });
   photo.addEventListener('change', async () => {
     const f = photo.files[0];
     if (!f) return;
-    progress.textContent = t('import_recognizing', { p: 0 });
+    progress.textContent = t('import_loading_engine', { p: 0 });
     let text = '';
     try {
-      text = await recognize(f, (p) => {
-        progress.textContent = t('import_recognizing', { p: Math.round(p * 100) });
+      text = await recognize(f, (phase, p) => {
+        progress.textContent = phase === 'recognizing'
+          ? t('import_recognizing', { p: Math.round(p * 100) })
+          : t('import_loading_engine', { p: Math.round(p * 100) });
       });
     } catch (e) {
       progress.textContent = 'OCR error';

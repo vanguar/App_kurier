@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // Build stamp shown in Settings so the user can confirm which version is live.
+  define: {
+    __BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC'),
+  },
   // GitHub Pages project site lives under /<repo>/. A fixed base is required so the
   // service worker scope and PWA manifest resolve correctly. If you rename the repo,
   // update this to match "/<new-repo-name>/".
