@@ -1,0 +1,9 @@
+[
+  { "matchKey": "marktplatz|1", "street": "Marktplatz", "houseNumber": "1", "postcode": "17033", "city": "Neubrandenburg", "lat": 53.5570, "lng": 13.2600 },
+  { "matchKey": "hauptstrasse|12", "street": "Hauptstraße", "houseNumber": "12", "postcode": "17033", "city": "Neubrandenburg", "lat": 53.5601, "lng": 13.2611 },
+  { "matchKey": "hauptstrasse|12a", "street": "Hauptstraße", "houseNumber": "12a", "postcode": "17033", "city": "Neubrandenburg", "lat": 53.5602, "lng": 13.2612 },
+  { "matchKey": "goethestrasse|5", "street": "Goethestraße", "houseNumber": "5", "postcode": "17033", "city": "Neubrandenburg", "lat": 53.5555, "lng": 13.2555 },
+  { "matchKey": "muellerstrasse|8", "street": "Müllerstraße", "houseNumber": "8", "postcode": "17034", "city": "Neubrandenburg", "lat": 53.5480, "lng": 13.2700 },
+  { "matchKey": "am markt|3", "street": "Am Markt", "houseNumber": "3", "postcode": "17033", "city": "Neubrandenburg", "lat": 53.5575, "lng": 13.2605 },
+  { "matchKey": "gartenweg|7", "street": "Gartenweg", "houseNumber": "7", "postcode": "17034", "city": "Neubrandenburg", "lat": 53.5450, "lng": 13.2800 }
+]
