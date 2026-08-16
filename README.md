@@ -36,21 +36,17 @@ npm run preview    # посмотреть собранную версию
 
 ---
 
-## Публикация на бесплатном хостинге
+## Публикация (GitHub Pages — уже настроено)
 
-Приложение — чистая статика, бэкенда нет. Подойдёт GitHub Pages или Vercel (оба бесплатны, оба дают HTTPS).
+**Живой адрес:** https://vanguar.github.io/App_kurier/
 
-**Vercel** (проще всего):
-1. Залей проект в репозиторий GitHub.
-2. На vercel.com → New Project → выбери репозиторий.
-3. Framework preset: **Vite**. Build: `npm run build`, output: `dist`. Deploy.
+Деплой автоматический: workflow `.github/workflows/deploy.yml` при каждом `git push`
+в ветку `kurier-app` (или `main`) собирает Vite и публикует `dist/` на GitHub Pages.
+Ничего вручную запускать не нужно — просто пушишь изменения.
 
-**GitHub Pages**:
-1. `npm run build` → получится папка `dist/`.
-2. Опубликуй содержимое `dist/` на ветку `gh-pages` (или через GitHub Actions).
-3. Settings → Pages → источник: ветка `gh-pages`.
-
-`base: './'` в `vite.config.js` уже настроен так, чтобы работать и на Vercel, и на под-пути GitHub Pages.
+> `base: '/App_kurier/'` в `vite.config.js` привязан к имени репозитория (нужно для
+> корректной работы Service Worker на проектном сайте). Переименуешь репозиторий —
+> поправь этот путь.
 
 ---
 
