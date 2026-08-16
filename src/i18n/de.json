@@ -124,5 +124,12 @@
   "settings_geocode_hint": "Findet Adresskoordinaten über OpenStreetMap ohne lokalen Index. Internet nötig; Adresse geht an den Kartendienst.",
   "geocode_on": "Online (an)",
   "geocode_off": "Nur offline",
-  "route_geocoding": "Ermittle Koordinaten… {i}/{n}"
+  "route_geocoding": "Ermittle Koordinaten… {i}/{n}",
+  "settings_routemetric": "Routenoptimierung",
+  "settings_routemetric_hint": "„Über Straßen“ nutzt echte Fahrstrecken (genau, Internet nötig). „Luftlinie“ ist offline und schneller.",
+  "metric_road": "Über Straßen (genau)",
+  "metric_straight": "Luftlinie (offline)",
+  "route_calc_road": "Berechne Straßenroute…",
+  "route_by_road": "Reihenfolge auf echten Straßen optimiert.",
+  "route_by_straight": "Reihenfolge per Luftlinie (Offline-Modus)."
 }

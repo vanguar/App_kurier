@@ -124,5 +124,12 @@
   "settings_geocode_hint": "Znajduje współrzędne adresu przez OpenStreetMap, gdy brak lokalnego indeksu. Wymaga internetu; adres jest wysyłany do usługi map.",
   "geocode_on": "Online (wł)",
   "geocode_off": "Tylko offline",
-  "route_geocoding": "Ustalam współrzędne… {i}/{n}"
+  "route_geocoding": "Ustalam współrzędne… {i}/{n}",
+  "settings_routemetric": "Optymalizacja trasy",
+  "settings_routemetric_hint": "„Po drogach” to realne odległości drogowe (dokładnie, wymaga internetu). „W linii prostej” działa offline i szybciej.",
+  "metric_road": "Po drogach (dokładnie)",
+  "metric_straight": "W linii prostej (offline)",
+  "route_calc_road": "Liczę trasę po drogach…",
+  "route_by_road": "Kolejność zoptymalizowana po realnych drogach.",
+  "route_by_straight": "Kolejność w linii prostej (tryb offline)."
 }

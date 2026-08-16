@@ -116,6 +116,30 @@ function orOpt(order, m) {
   return order;
 }
 
+// Road-network optimization via the public OSRM "trip" service (solves TSP on real
+// roads, closed loop from Base). Throws on error so the caller can fall back to
+// the straight-line solver. base: {lat,lng}, stops: [{id,lat,lng}].
+export async function roadTrip(base, stops) {
+  const usable = stops.filter((s) => s && typeof s.lat === 'number' && typeof s.lng === 'number');
+  const skipped = stops.filter((s) => !(s && typeof s.lat === 'number' && typeof s.lng === 'number'));
+  if (!usable.length) return { orderedIds: [], totalMeters: 0, usableCount: 0, skipped };
+
+  const coordStr = [base, ...usable].map((p) => `${p.lng},${p.lat}`).join(';');
+  const url = `https://router.project-osrm.org/trip/v1/driving/${coordStr}?source=first&roundtrip=true&overview=false`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.code !== 'Ok' || !Array.isArray(data.waypoints)) {
+    throw new Error(data.message || 'OSRM error');
+  }
+  // waypoints keep input order; waypoint_index is the position in the optimized trip.
+  const inputAtPos = new Array(data.waypoints.length);
+  data.waypoints.forEach((w, i) => { inputAtPos[w.waypoint_index] = i; });
+  // Position 0 is Base (source=first). Remaining positions map to stops (input i-1).
+  const orderedIds = inputAtPos.filter((i) => i !== 0).map((i) => usable[i - 1].id);
+  const totalMeters = (data.trips && data.trips[0] && data.trips[0].distance) || 0;
+  return { orderedIds, totalMeters, usableCount: usable.length, skipped };
+}
+
 // base: {lat,lng}. stops: [{id, lat, lng, ...}]. Returns ordered stop ids + total meters.
 export function computeRoute(base, stops) {
   const usable = stops.filter((s) => s && typeof s.lat === 'number' && typeof s.lng === 'number');

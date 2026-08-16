@@ -124,5 +124,12 @@
   "settings_geocode_hint": "Finds address coordinates via OpenStreetMap when no local index. Needs internet; the address is sent to the map service.",
   "geocode_on": "Online (on)",
   "geocode_off": "Offline only",
-  "route_geocoding": "Getting coordinates… {i}/{n}"
+  "route_geocoding": "Getting coordinates… {i}/{n}",
+  "settings_routemetric": "Route optimization",
+  "settings_routemetric_hint": "“By roads” uses real driving distances (accurate, needs internet). “Straight-line” is offline and faster.",
+  "metric_road": "By roads (accurate)",
+  "metric_straight": "Straight-line (offline)",
+  "route_calc_road": "Computing road route…",
+  "route_by_road": "Order optimized on real roads.",
+  "route_by_straight": "Order by straight-line (offline mode)."
 }

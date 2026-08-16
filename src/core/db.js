@@ -49,6 +49,7 @@ const DEFAULT_SETTINGS = {
   routeType: 'closed',
   language: null, // resolved on first run
   distanceMetric: 'haversine',
+  routeMetric: 'road', // 'road' (OSRM, real roads) | 'straight' (haversine, offline)
   theme: 'auto', // 'auto' | 'light' | 'dark'
   navigator: 'ask', // 'ask' | 'google' | 'waze' | 'geo'  (which map app to open a stop in)
   ocrEngine: 'cloud', // 'device' (Tesseract, offline) | 'cloud' (OCR.space, accurate)

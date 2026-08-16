@@ -7,7 +7,7 @@ import {
 import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress, onlineGeocode } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts } from '../core/matching.js';
-import { computeRoute } from '../core/route.js';
+import { computeRoute, roadTrip } from '../core/route.js';
 import { recognize, cloudRecognize, splitIntoAddressBlocks, warmUp } from '../ocr/ocr.js';
 
 let settings = null;
@@ -291,6 +291,23 @@ async function renderSettings(main) {
         class: 'chip' + (!geoOn ? ' on' : ''),
         onclick: async () => { settings = await saveSettings({ onlineGeocode: false }); render(); },
       }, t('geocode_off')),
+    ]),
+  ]));
+
+  // Route optimization metric
+  const road = (settings.routeMetric || 'road') === 'road';
+  main.appendChild(el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('settings_routemetric') }),
+    el('p', { class: 'hint', text: t('settings_routemetric_hint') }),
+    el('div', { class: 'langgrid' }, [
+      el('button', {
+        class: 'chip' + (road ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ routeMetric: 'road' }); render(); },
+      }, t('metric_road')),
+      el('button', {
+        class: 'chip' + (!road ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ routeMetric: 'straight' }); render(); },
+      }, t('metric_straight')),
     ]),
   ]));
 
@@ -826,7 +843,23 @@ async function renderRoute(main) {
       return;
     }
 
-    const { orderedIds, totalMeters } = computeRoute(settings.base.coords, stops);
+    // Prefer real-road optimization (OSRM). Fall back to straight-line on error/offline.
+    clear(result);
+    const status = el('p', { class: 'hint' });
+    result.appendChild(status);
+    let routed = null;
+    const wantRoad = (settings.routeMetric || 'road') === 'road';
+    if (wantRoad && navigator.onLine && stops.length <= 100) {
+      status.textContent = t('route_calc_road');
+      try {
+        routed = await roadTrip(settings.base.coords, stops);
+      } catch (e) {
+        routed = null;
+      }
+    }
+    const byRoad = !!routed;
+    if (!routed) routed = computeRoute(settings.base.coords, stops);
+    const { orderedIds, totalMeters } = routed;
 
     // persist routeOrder
     const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
@@ -835,7 +868,7 @@ async function renderRoute(main) {
       await putPoint(p);
     }
 
-    renderRouteResult(result, points, orderedIds, totalMeters, skippedNoCoord.length);
+    renderRouteResult(result, points, orderedIds, totalMeters, skippedNoCoord.length, byRoad);
   });
 }
 
@@ -887,12 +920,13 @@ function navSheet(coords, label) {
   document.body.appendChild(overlay);
 }
 
-function renderRouteResult(result, points, orderedIds, totalMeters, skipped) {
+function renderRouteResult(result, points, orderedIds, totalMeters, skipped, byRoad) {
   clear(result);
   const byId = new Map(points.map((p) => [p.id, p]));
   const km = (totalMeters / 1000).toFixed(1);
 
   result.appendChild(el('p', { class: 'route-sum', text: t('route_summary', { n: orderedIds.length, km }) }));
+  result.appendChild(el('p', { class: 'hint', text: byRoad ? t('route_by_road') : t('route_by_straight') }));
   result.appendChild(el('div', { class: 'stop base', text: `🏁 ${t('route_base')}` }));
 
   orderedIds.forEach((id, i) => {
