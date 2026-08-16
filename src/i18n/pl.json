@@ -117,5 +117,7 @@
   "voice_start": "Dyktuj",
   "voice_listening": "Słucham…",
   "voice_unsupported": "Wprowadzanie głosowe nie jest obsługiwane w tej przeglądarce.",
-  "voice_error": "Błąd rozpoznawania mowy. Sprawdź mikrofon i internet."
+  "voice_error": "Błąd rozpoznawania mowy. Sprawdź mikrofon i internet.",
+  "import_take_photo_btn": "Zrób zdjęcie",
+  "import_pick_file_btn": "Zrzut / plik"
 }

@@ -117,5 +117,7 @@
   "voice_start": "Diktieren",
   "voice_listening": "Höre zu…",
   "voice_unsupported": "Spracheingabe wird in diesem Browser nicht unterstützt.",
-  "voice_error": "Spracherkennungsfehler. Mikrofon und Internet prüfen."
+  "voice_error": "Spracherkennungsfehler. Mikrofon und Internet prüfen.",
+  "import_take_photo_btn": "Foto aufnehmen",
+  "import_pick_file_btn": "Screenshot / Datei"
 }

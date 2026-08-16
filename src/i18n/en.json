@@ -117,5 +117,7 @@
   "voice_start": "Dictate",
   "voice_listening": "Listening…",
   "voice_unsupported": "Voice input is not supported in this browser.",
-  "voice_error": "Voice recognition error. Check the mic and internet."
+  "voice_error": "Voice recognition error. Check the mic and internet.",
+  "import_take_photo_btn": "Take photo",
+  "import_pick_file_btn": "Screenshot / file"
 }

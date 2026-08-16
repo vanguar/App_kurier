@@ -474,16 +474,12 @@ async function renderImport(main) {
   ]);
   main.appendChild(typeSel);
 
-  // Parcels arrive as an on-screen LIST -> pick a screenshot/file (no forced camera).
-  // Mail (magazine/letter) is physical, ONE address -> open the camera directly.
   const isList = importState.type === 'parcel';
-  const photo = el('input', isList
-    ? { type: 'file', accept: 'image/*', class: 'hidden' }
-    : { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden' });
   const instruction = el('p', { class: 'hint', text: isList ? t('import_hint_parcel') : t('import_hint_mail') });
   const progress = el('p', { class: 'hint', id: 'ocr-status', text: '' }); // OCR status only
-  photo.addEventListener('change', async () => {
-    const f = photo.files[0];
+
+  // Shared handler for BOTH the camera and the file/screenshot pickers.
+  const handleFile = async (f) => {
     if (!f) return;
     let text = '';
     try {
@@ -507,7 +503,6 @@ async function renderImport(main) {
     const blocks = isList
       ? splitIntoAddressBlocks(text)
       : (text.trim() ? [text.trim()] : []);
-    photo.value = ''; // allow re-picking the same file / taking the next photo
     if (!blocks.length) {
       progress.textContent = t('import_no_text');
       render();
@@ -516,7 +511,6 @@ async function renderImport(main) {
     // Accumulate across photos (a parcel list may span 2-3 photos), de-duplicating
     // by matchKey so overlapping shots don't create doubles.
     const existingKeys = new Set(importState.rows.map((r) => r.parsed.matchKey).filter(Boolean));
-    let added = 0;
     for (const b of blocks) {
       const g = await geocodeRaw(b);
       if (g.parsed.matchKey && existingKeys.has(g.parsed.matchKey)) continue;
@@ -530,20 +524,25 @@ async function renderImport(main) {
         suggestion: g.suggestion,
         selected: g.confidence !== 'red',
       });
-      added++;
     }
     render();
-  });
+  };
 
-  const btnLabel = isList ? t('import_btn_parcel') : t('import_btn_mail');
+  // Two inputs so BOTH options always work: camera opens the camera; file lets
+  // you pick a screenshot / gallery image (device choosers vary, so we split them).
+  const cameraInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden' });
+  const fileInput = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
+  cameraInput.addEventListener('change', () => { const f = cameraInput.files[0]; cameraInput.value = ''; handleFile(f); });
+  fileInput.addEventListener('change', () => { const f = fileInput.files[0]; fileInput.value = ''; handleFile(f); });
+
   const photoCard = el('div', { class: 'card' }, [
-    el('button', {
-      class: 'btn primary big',
-      text: (importState.rows.length ? '+ ' : '') + btnLabel,
-      onclick: () => photo.click(),
-    }),
-    photo,
     instruction,
+    el('div', { class: 'btnrow' }, [
+      el('button', { class: 'btn primary', text: '📷 ' + t('import_take_photo_btn'), onclick: () => cameraInput.click() }),
+      el('button', { class: 'btn', text: '🖼️ ' + t('import_pick_file_btn'), onclick: () => fileInput.click() }),
+    ]),
+    cameraInput,
+    fileInput,
     progress,
     importState.rows.length
       ? el('button', {
