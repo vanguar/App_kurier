@@ -119,5 +119,10 @@
   "voice_unsupported": "Spracheingabe wird in diesem Browser nicht unterstützt.",
   "voice_error": "Spracherkennungsfehler. Mikrofon und Internet prüfen.",
   "import_take_photo_btn": "Foto aufnehmen",
-  "import_pick_file_btn": "Screenshot / Datei"
+  "import_pick_file_btn": "Screenshot / Datei",
+  "settings_geocode": "Koordinaten online (für Route)",
+  "settings_geocode_hint": "Findet Adresskoordinaten über OpenStreetMap ohne lokalen Index. Internet nötig; Adresse geht an den Kartendienst.",
+  "geocode_on": "Online (an)",
+  "geocode_off": "Nur offline",
+  "route_geocoding": "Ermittle Koordinaten… {i}/{n}"
 }

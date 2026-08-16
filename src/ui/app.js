@@ -5,7 +5,7 @@ import {
   loadAddressIndex, indexCount, resetSettings,
 } from '../core/db.js';
 import { parseAddress } from '../core/normalizer.js';
-import { geocodeRaw, assessAddress } from '../core/geocode.js';
+import { geocodeRaw, assessAddress, onlineGeocode } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts } from '../core/matching.js';
 import { computeRoute } from '../core/route.js';
 import { recognize, cloudRecognize, splitIntoAddressBlocks, warmUp } from '../ocr/ocr.js';
@@ -154,6 +154,11 @@ async function resolveBaseCoords(raw) {
   if (geo.coords) return geo.coords;
   const prev = settings.base;
   if (prev?.coords && prev.address?.raw === raw) return prev.coords;
+  // Fall back to online geocoding (OpenStreetMap) so any typed depot gets coords.
+  if ((settings.onlineGeocode !== false) && navigator.onLine) {
+    const c = await onlineGeocode(parsed);
+    if (c) return c;
+  }
   return null;
 }
 
@@ -270,6 +275,23 @@ async function renderSettings(main) {
         }, th.label),
       ),
     ),
+  ]));
+
+  // Online geocoding (coordinates for routing)
+  const geoOn = settings.onlineGeocode !== false;
+  main.appendChild(el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('settings_geocode') }),
+    el('p', { class: 'hint', text: t('settings_geocode_hint') }),
+    el('div', { class: 'langgrid' }, [
+      el('button', {
+        class: 'chip' + (geoOn ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ onlineGeocode: true }); render(); },
+      }, t('geocode_on')),
+      el('button', {
+        class: 'chip' + (!geoOn ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ onlineGeocode: false }); render(); },
+      }, t('geocode_off')),
+    ]),
   ]));
 
   // Default navigator
@@ -409,7 +431,7 @@ let importState = { type: 'parcel', rows: [] };
 async function addManualRow(raw) {
   const value = (raw || '').trim();
   if (!value) return;
-  const g = await geocodeRaw(value);
+  const g = await geocodeRaw(value, { online: settings.onlineGeocode !== false });
   const existing = new Set(importState.rows.map((r) => r.parsed.matchKey).filter(Boolean));
   if (g.parsed.matchKey && existing.has(g.parsed.matchKey)) { toast(t('import_nothing')); return; }
   importState.rows.push({
@@ -512,7 +534,7 @@ async function renderImport(main) {
     // by matchKey so overlapping shots don't create doubles.
     const existingKeys = new Set(importState.rows.map((r) => r.parsed.matchKey).filter(Boolean));
     for (const b of blocks) {
-      const g = await geocodeRaw(b);
+      const g = await geocodeRaw(b, { online: settings.onlineGeocode !== false });
       if (g.parsed.matchKey && existingKeys.has(g.parsed.matchKey)) continue;
       if (g.parsed.matchKey) existingKeys.add(g.parsed.matchKey);
       importState.rows.push({
@@ -603,7 +625,7 @@ function renderReview() {
     });
     streetInput.addEventListener('change', async () => {
       row.editStreet = streetInput.value;
-      const g = await geocodeRaw(streetInput.value);
+      const g = await geocodeRaw(streetInput.value, { online: settings.onlineGeocode !== false });
       row.parsed = g.parsed;
       row.confidence = g.confidence;
       row.coords = g.coords;
@@ -777,6 +799,22 @@ async function renderRoute(main) {
 
   buildBtn.addEventListener('click', async () => {
     const points = await getPoints();
+
+    // Fill in coordinates for any points that don't have them yet (online),
+    // so already-added stops also become routable.
+    const missing = points.filter((p) => !p.coords);
+    if (missing.length && (settings.onlineGeocode !== false) && navigator.onLine) {
+      clear(result);
+      const status = el('p', { class: 'hint' });
+      result.appendChild(status);
+      for (let i = 0; i < missing.length; i++) {
+        status.textContent = t('route_geocoding', { i: i + 1, n: missing.length });
+        const p = missing[i];
+        const c = await onlineGeocode({ ...p.address, matchKey: p.matchKey });
+        if (c) { p.coords = c; p.geocodeStatus = 'matched'; await putPoint(p); }
+      }
+    }
+
     const stops = points
       .filter((p) => p.coords)
       .map((p) => ({ id: p.id, lat: p.coords.lat, lng: p.coords.lng }));

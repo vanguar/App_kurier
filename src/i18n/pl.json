@@ -119,5 +119,10 @@
   "voice_unsupported": "Wprowadzanie głosowe nie jest obsługiwane w tej przeglądarce.",
   "voice_error": "Błąd rozpoznawania mowy. Sprawdź mikrofon i internet.",
   "import_take_photo_btn": "Zrób zdjęcie",
-  "import_pick_file_btn": "Zrzut / plik"
+  "import_pick_file_btn": "Zrzut / plik",
+  "settings_geocode": "Współrzędne online (do trasy)",
+  "settings_geocode_hint": "Znajduje współrzędne adresu przez OpenStreetMap, gdy brak lokalnego indeksu. Wymaga internetu; adres jest wysyłany do usługi map.",
+  "geocode_on": "Online (wł)",
+  "geocode_off": "Tylko offline",
+  "route_geocoding": "Ustalam współrzędne… {i}/{n}"
 }

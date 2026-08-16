@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS = {
   navigator: 'ask', // 'ask' | 'google' | 'waze' | 'geo'  (which map app to open a stop in)
   ocrEngine: 'cloud', // 'device' (Tesseract, offline) | 'cloud' (OCR.space, accurate)
   ocrApiKey: '', // OCR.space free key (empty -> uses limited demo key)
+  onlineGeocode: true, // look up coordinates online (OpenStreetMap) when local index misses
   onboarded: false, // first-run welcome + Base wizard completed?
 };
 

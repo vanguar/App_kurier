@@ -46,9 +46,54 @@ export async function assessAddress(parsed) {
   return { confidence: 'red', coords: null, suggestion, reason: 'street-missing' };
 }
 
-// Convenience: parse + assess in one call.
-export async function geocodeRaw(raw) {
+// ---- Online geocoding (OpenStreetMap / Nominatim) ----
+// Free, no API key. Used when the local district index has no match, so the app
+// "just works" like Google Maps. Throttled to respect Nominatim's ~1 req/sec.
+let _lastNominatim = 0;
+const _geoCache = new Map();
+
+export async function onlineGeocode(parsed) {
+  if (!parsed) return null;
+  const key = parsed.matchKey || parsed.raw || '';
+  if (_geoCache.has(key)) return _geoCache.get(key);
+
+  const wait = 1100 - (Date.now() - _lastNominatim);
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  _lastNominatim = Date.now();
+
+  const params = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'de' });
+  if (parsed.street && parsed.houseNumber) {
+    params.set('street', `${parsed.houseNumber}${parsed.houseLetter || ''} ${parsed.street}`.trim());
+    if (parsed.city) params.set('city', parsed.city);
+    if (parsed.postcode) params.set('postalcode', parsed.postcode);
+  } else {
+    params.set('q', parsed.raw || '');
+  }
+
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+    const arr = await res.json();
+    const hit = Array.isArray(arr) && arr[0];
+    const coords = hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : null;
+    _geoCache.set(key, coords);
+    return coords;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Convenience: parse + assess in one call. Falls back to online geocoding
+// (unless disabled) when the local index has no coordinates.
+export async function geocodeRaw(raw, { online = true } = {}) {
   const parsed = parseAddress(raw);
   const assessment = await assessAddress(parsed);
+  if (!assessment.coords && online && navigator.onLine) {
+    const coords = await onlineGeocode(parsed);
+    if (coords) {
+      return { parsed, ...assessment, coords, confidence: 'green', reason: 'online' };
+    }
+  }
   return { parsed, ...assessment };
 }
