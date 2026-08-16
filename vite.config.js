@@ -2,8 +2,10 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  // Relative base so the build works on GitHub Pages (project subpath) and Vercel alike.
-  base: './',
+  // GitHub Pages project site lives under /<repo>/. A fixed base is required so the
+  // service worker scope and PWA manifest resolve correctly. If you rename the repo,
+  // update this to match "/<new-repo-name>/".
+  base: '/App_kurier/',
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
