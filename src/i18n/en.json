@@ -4,7 +4,6 @@
   "nav_import": "Scan",
   "nav_route": "Route",
   "nav_settings": "Settings",
-
   "onb_welcome_title": "Welcome!",
   "onb_welcome_text": "Courier helper: it merges parcels and letters/magazines into one checklist per stop and builds your route. Works offline, data stays only on your phone.",
   "onb_choose_lang": "Choose a language",
@@ -14,7 +13,6 @@
   "onb_base_text": "This is your depot — the route start and finish. We'll remember it so you don't retype it. You can change it later in Settings.",
   "onb_continue": "Continue",
   "onb_back": "Back",
-
   "settings_title": "Settings",
   "settings_nav": "Default navigator",
   "nav_ask": "Ask each time",
@@ -45,7 +43,6 @@
   "settings_danger": "Danger zone",
   "settings_clear_points": "Delete all stops",
   "settings_clear_confirm": "Delete ALL stops and items? This cannot be undone.",
-
   "import_title": "Scan addresses",
   "import_take_photo": "Take photo / choose",
   "import_photo_hint": "Photograph the parcel list from the official app, or an address on a letter/magazine.",
@@ -61,17 +58,14 @@
   "import_add_selected": "Add selected ({n})",
   "import_added": "Stops added: {n}",
   "import_nothing": "Nothing selected",
-
   "conf_green": "Found in index",
   "conf_yellow": "Street exists, house not found — check",
   "conf_red": "Street not found — likely OCR error",
   "suggest_prefix": "Maybe:",
   "apply_suggestion": "Apply",
-
   "type_parcel": "Parcel",
   "type_magazine": "Magazine",
   "type_letter": "Letter",
-
   "points_title": "Delivery stops",
   "points_empty": "No stops yet. Scan some addresses.",
   "points_count": "Stops: {n}",
@@ -82,7 +76,6 @@
   "point_delete": "Delete stop",
   "point_delete_confirm": "Delete this stop and its items?",
   "add_item_here": "Add item here",
-
   "route_title": "Route",
   "route_build": "Build route",
   "route_need_base": "Set the Base address in settings first.",
@@ -93,7 +86,6 @@
   "route_open_maps": "Open in maps",
   "route_skipped": "No coordinates (not routed): {n}",
   "route_stop_n": "Stop {n}",
-
   "manual_add_title": "Add manually",
   "manual_address": "Address",
   "manual_type": "Item type",
@@ -102,5 +94,6 @@
   "delete": "Delete",
   "close": "Close",
   "offline_ready": "Ready to work offline",
-  "install_hint": "Add the app to your home screen for offline use."
+  "install_hint": "Add the app to your home screen for offline use.",
+  "import_screenshot_tip": "Tip: if the official app is on this same phone, take a SCREENSHOT of the list and pick it. A screenshot recognizes far better than a photo of a screen."
 }

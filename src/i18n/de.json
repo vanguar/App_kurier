@@ -4,7 +4,6 @@
   "nav_import": "Scannen",
   "nav_route": "Route",
   "nav_settings": "Einstellungen",
-
   "onb_welcome_title": "Willkommen!",
   "onb_welcome_text": "Kurier-Helfer: Pakete und Briefe/Zeitschriften werden pro Stopp zu einer Liste zusammengeführt und die Route berechnet. Offline nutzbar, Daten bleiben nur auf dem Telefon.",
   "onb_choose_lang": "Sprache wählen",
@@ -14,7 +13,6 @@
   "onb_base_text": "Das ist Ihr Depot — Start und Ziel der Route. Wir merken sie uns, damit Sie sie nicht jedes Mal eingeben. Später in den Einstellungen änderbar.",
   "onb_continue": "Weiter",
   "onb_back": "Zurück",
-
   "settings_title": "Einstellungen",
   "settings_nav": "Standard-Navigation",
   "nav_ask": "Jedes Mal fragen",
@@ -45,7 +43,6 @@
   "settings_danger": "Gefahrenzone",
   "settings_clear_points": "Alle Stopps löschen",
   "settings_clear_confirm": "ALLE Stopps und Sendungen löschen? Nicht umkehrbar.",
-
   "import_title": "Adressen scannen",
   "import_take_photo": "Foto aufnehmen / wählen",
   "import_photo_hint": "Fotografieren Sie die Paketliste aus der offiziellen App oder eine Adresse auf Brief/Zeitschrift.",
@@ -61,17 +58,14 @@
   "import_add_selected": "Ausgewählte hinzufügen ({n})",
   "import_added": "Stopps hinzugefügt: {n}",
   "import_nothing": "Nichts ausgewählt",
-
   "conf_green": "Im Index gefunden",
   "conf_yellow": "Straße vorhanden, Hausnummer nicht gefunden — prüfen",
   "conf_red": "Straße nicht gefunden — wahrscheinlich OCR-Fehler",
   "suggest_prefix": "Vielleicht:",
   "apply_suggestion": "Übernehmen",
-
   "type_parcel": "Paket",
   "type_magazine": "Zeitschrift",
   "type_letter": "Brief",
-
   "points_title": "Lieferstopps",
   "points_empty": "Noch keine Stopps. Adressen scannen.",
   "points_count": "Stopps: {n}",
@@ -82,7 +76,6 @@
   "point_delete": "Stopp löschen",
   "point_delete_confirm": "Diesen Stopp und seine Sendungen löschen?",
   "add_item_here": "Sendung hier hinzufügen",
-
   "route_title": "Route",
   "route_build": "Route berechnen",
   "route_need_base": "Zuerst die Basis-Adresse in den Einstellungen festlegen.",
@@ -93,7 +86,6 @@
   "route_open_maps": "In Karten öffnen",
   "route_skipped": "Ohne Koordinaten (nicht in Route): {n}",
   "route_stop_n": "Stopp {n}",
-
   "manual_add_title": "Manuell hinzufügen",
   "manual_address": "Adresse",
   "manual_type": "Sendungstyp",
@@ -102,5 +94,6 @@
   "delete": "Löschen",
   "close": "Schließen",
   "offline_ready": "Bereit für Offline-Betrieb",
-  "install_hint": "App zum Startbildschirm hinzufügen für Offline-Nutzung."
+  "install_hint": "App zum Startbildschirm hinzufügen für Offline-Nutzung.",
+  "import_screenshot_tip": "Tipp: Wenn die offizielle App auf diesem Telefon ist, machen Sie einen SCREENSHOT der Liste und wählen Sie ihn. Ein Screenshot wird viel besser erkannt als ein Foto des Bildschirms."
 }

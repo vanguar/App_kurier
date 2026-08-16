@@ -394,8 +394,9 @@ async function renderImport(main) {
   ]);
   main.appendChild(typeSel);
 
-  // Photo input
-  const photo = el('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden' });
+  // Photo/screenshot input. No forced `capture` so the user can pick a clean
+  // screenshot (best for the on-screen parcel list) OR use the camera (for mail).
+  const photo = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
   const progress = el('p', { class: 'hint', id: 'ocr-status', text: t('import_photo_hint') });
   photo.addEventListener('change', async () => {
     const f = photo.files[0];
@@ -452,6 +453,9 @@ async function renderImport(main) {
     progress,
     isList
       ? el('p', { class: 'hint', text: t('import_multi_hint') })
+      : null,
+    isList
+      ? el('p', { class: 'ok', text: t('import_screenshot_tip') })
       : null,
     importState.rows.length
       ? el('button', {

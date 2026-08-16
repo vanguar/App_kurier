@@ -4,7 +4,6 @@
   "nav_import": "Skanuj",
   "nav_route": "Trasa",
   "nav_settings": "Ustawienia",
-
   "onb_welcome_title": "Witaj!",
   "onb_welcome_text": "Pomocnik kuriera: łączy paczki oraz listy/czasopisma w jedną listę na każdym punkcie i wyznacza trasę. Działa offline, dane pozostają tylko w telefonie.",
   "onb_choose_lang": "Wybierz język",
@@ -14,7 +13,6 @@
   "onb_base_text": "To magazyn — start i koniec trasy. Zapamiętamy go, aby nie wpisywać za każdym razem. Można zmienić później w Ustawieniach.",
   "onb_continue": "Dalej",
   "onb_back": "Wstecz",
-
   "settings_title": "Ustawienia",
   "settings_nav": "Domyślna nawigacja",
   "nav_ask": "Pytaj za każdym razem",
@@ -45,7 +43,6 @@
   "settings_danger": "Strefa niebezpieczna",
   "settings_clear_points": "Usuń wszystkie punkty",
   "settings_clear_confirm": "Usunąć WSZYSTKIE punkty i przesyłki? Nieodwracalne.",
-
   "import_title": "Skanuj adresy",
   "import_take_photo": "Zrób zdjęcie / wybierz",
   "import_photo_hint": "Sfotografuj listę paczek z oficjalnej aplikacji lub adres na liście/czasopiśmie.",
@@ -61,17 +58,14 @@
   "import_add_selected": "Dodaj zaznaczone ({n})",
   "import_added": "Dodano punktów: {n}",
   "import_nothing": "Nic nie zaznaczono",
-
   "conf_green": "Znaleziono w indeksie",
   "conf_yellow": "Ulica istnieje, numeru nie znaleziono — sprawdź",
   "conf_red": "Nie znaleziono ulicy — prawdopodobnie błąd OCR",
   "suggest_prefix": "Może:",
   "apply_suggestion": "Zastosuj",
-
   "type_parcel": "Paczka",
   "type_magazine": "Czasopismo",
   "type_letter": "List",
-
   "points_title": "Punkty dostawy",
   "points_empty": "Brak punktów. Zeskanuj adresy.",
   "points_count": "Punkty: {n}",
@@ -82,7 +76,6 @@
   "point_delete": "Usuń punkt",
   "point_delete_confirm": "Usunąć ten punkt i jego przesyłki?",
   "add_item_here": "Dodaj przesyłkę tutaj",
-
   "route_title": "Trasa",
   "route_build": "Wyznacz trasę",
   "route_need_base": "Najpierw ustaw adres Bazy w ustawieniach.",
@@ -93,7 +86,6 @@
   "route_open_maps": "Otwórz w mapach",
   "route_skipped": "Bez współrzędnych (poza trasą): {n}",
   "route_stop_n": "Punkt {n}",
-
   "manual_add_title": "Dodaj ręcznie",
   "manual_address": "Adres",
   "manual_type": "Typ przesyłki",
@@ -102,5 +94,6 @@
   "delete": "Usuń",
   "close": "Zamknij",
   "offline_ready": "Gotowe do pracy offline",
-  "install_hint": "Dodaj aplikację do ekranu głównego, aby używać offline."
+  "install_hint": "Dodaj aplikację do ekranu głównego, aby używać offline.",
+  "import_screenshot_tip": "Wskazówka: jeśli oficjalna aplikacja jest na tym telefonie, zrób ZRZUT EKRANU listy i wybierz go. Zrzut rozpoznaje się znacznie lepiej niż zdjęcie ekranu."
 }
