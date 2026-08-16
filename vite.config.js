@@ -1,23 +1,39 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// Single build stamp used both in the bundle (__BUILD__) and in version.json,
+// so the client can detect "server has a newer build than I'm running".
+const BUILD = new Date().toISOString().slice(0, 19).replace('T', ' ') + ' UTC';
+
+// Emit a tiny, never-precached version.json for the client-side freshness gate.
+function emitVersion() {
+  return {
+    name: 'emit-version',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ build: BUILD }) });
+    },
+  };
+}
+
 export default defineConfig({
-  // Build stamp shown in Settings so the user can confirm which version is live.
   define: {
-    __BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC'),
+    __BUILD__: JSON.stringify(BUILD),
   },
   // GitHub Pages project site lives under /<repo>/. A fixed base is required so the
   // service worker scope and PWA manifest resolve correctly. If you rename the repo,
   // update this to match "/<new-repo-name>/".
   base: '/App_kurier/',
   plugins: [
+    emitVersion(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg'],
-      // Tesseract loads WASM + language data at runtime; allow larger precache entries.
       workbox: {
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
-        globPatterns: ['**/*.{js,css,html,svg,wasm}'],
+        globPatterns: ['**/*.{js,css,html,svg,wasm}'], // note: version.json intentionally excluded
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
         runtimeCaching: [
           {
             // Tesseract core + traineddata fetched from CDN on first use -> cache for offline.
