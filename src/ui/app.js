@@ -394,10 +394,14 @@ async function renderImport(main) {
   ]);
   main.appendChild(typeSel);
 
-  // Photo/screenshot input. No forced `capture` so the user can pick a clean
-  // screenshot (best for the on-screen parcel list) OR use the camera (for mail).
-  const photo = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
-  const progress = el('p', { class: 'hint', id: 'ocr-status', text: t('import_photo_hint') });
+  // Parcels arrive as an on-screen LIST -> pick a screenshot/file (no forced camera).
+  // Mail (magazine/letter) is physical, ONE address -> open the camera directly.
+  const isList = importState.type === 'parcel';
+  const photo = el('input', isList
+    ? { type: 'file', accept: 'image/*', class: 'hidden' }
+    : { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden' });
+  const instruction = el('p', { class: 'hint', text: isList ? t('import_hint_parcel') : t('import_hint_mail') });
+  const progress = el('p', { class: 'hint', id: 'ocr-status', text: '' }); // OCR status only
   photo.addEventListener('change', async () => {
     const f = photo.files[0];
     if (!f) return;
@@ -442,21 +446,16 @@ async function renderImport(main) {
     render();
   });
 
-  const isList = importState.type === 'parcel';
+  const btnLabel = isList ? t('import_btn_parcel') : t('import_btn_mail');
   const photoCard = el('div', { class: 'card' }, [
     el('button', {
       class: 'btn primary big',
-      text: importState.rows.length ? '+ ' + t('import_take_photo') : t('import_take_photo'),
+      text: (importState.rows.length ? '+ ' : '') + btnLabel,
       onclick: () => photo.click(),
     }),
     photo,
+    instruction,
     progress,
-    isList
-      ? el('p', { class: 'hint', text: t('import_multi_hint') })
-      : null,
-    isList
-      ? el('p', { class: 'ok', text: t('import_screenshot_tip') })
-      : null,
     importState.rows.length
       ? el('button', {
           class: 'btn danger sm', text: t('import_clear'),

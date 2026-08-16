@@ -95,5 +95,9 @@
   "close": "Close",
   "offline_ready": "Ready to work offline",
   "install_hint": "Add the app to your home screen for offline use.",
-  "import_screenshot_tip": "Tip: if the official app is on this same phone, take a SCREENSHOT of the list and pick it. A screenshot recognizes far better than a photo of a screen."
+  "import_screenshot_tip": "Tip: if the official app is on this same phone, take a SCREENSHOT of the list and pick it. A screenshot recognizes far better than a photo of a screen.",
+  "import_btn_parcel": "Pick list screenshot",
+  "import_btn_mail": "Photograph the address",
+  "import_hint_parcel": "PARCELS are a list. Take a SCREENSHOT of the list in the official app and pick it. Several screenshots are fine — addresses accumulate, duplicates are removed.",
+  "import_hint_mail": "MAGAZINE/LETTER — ONE address each. The camera opens — point it at the mail address."
 }

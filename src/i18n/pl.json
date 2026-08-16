@@ -95,5 +95,9 @@
   "close": "Zamknij",
   "offline_ready": "Gotowe do pracy offline",
   "install_hint": "Dodaj aplikację do ekranu głównego, aby używać offline.",
-  "import_screenshot_tip": "Wskazówka: jeśli oficjalna aplikacja jest na tym telefonie, zrób ZRZUT EKRANU listy i wybierz go. Zrzut rozpoznaje się znacznie lepiej niż zdjęcie ekranu."
+  "import_screenshot_tip": "Wskazówka: jeśli oficjalna aplikacja jest na tym telefonie, zrób ZRZUT EKRANU listy i wybierz go. Zrzut rozpoznaje się znacznie lepiej niż zdjęcie ekranu.",
+  "import_btn_parcel": "Wybierz zrzut listy",
+  "import_btn_mail": "Sfotografuj adres",
+  "import_hint_parcel": "PACZKI to lista. Zrób ZRZUT EKRANU listy w oficjalnej aplikacji i wybierz go. Można kilka zrzutów — adresy się zbiorą, duplikaty znikną.",
+  "import_hint_mail": "CZASOPISMO/LIST — po JEDNYM adresie. Otworzy się aparat — skieruj na adres przesyłki."
 }

@@ -95,5 +95,9 @@
   "close": "Schließen",
   "offline_ready": "Bereit für Offline-Betrieb",
   "install_hint": "App zum Startbildschirm hinzufügen für Offline-Nutzung.",
-  "import_screenshot_tip": "Tipp: Wenn die offizielle App auf diesem Telefon ist, machen Sie einen SCREENSHOT der Liste und wählen Sie ihn. Ein Screenshot wird viel besser erkannt als ein Foto des Bildschirms."
+  "import_screenshot_tip": "Tipp: Wenn die offizielle App auf diesem Telefon ist, machen Sie einen SCREENSHOT der Liste und wählen Sie ihn. Ein Screenshot wird viel besser erkannt als ein Foto des Bildschirms.",
+  "import_btn_parcel": "Screenshot der Liste wählen",
+  "import_btn_mail": "Adresse fotografieren",
+  "import_hint_parcel": "PAKETE sind eine Liste. Machen Sie einen SCREENSHOT der Liste in der offiziellen App und wählen Sie ihn. Mehrere Screenshots möglich — Adressen sammeln sich, Duplikate entfallen.",
+  "import_hint_mail": "ZEITSCHRIFT/BRIEF — je EINE Adresse. Die Kamera öffnet sich — auf die Adresse richten."
 }
