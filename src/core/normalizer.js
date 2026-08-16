@@ -70,14 +70,21 @@ export function parseAddress(raw) {
     city = after.replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
-  // Isolate the "street + house" segment, stripping the postcode/city tail.
-  // Handles both single-line ("Neubrandenburger Straße 9a, 17109 Demmin")
-  // and multi-line ("Hauptstraße 12\n17033 Neubrandenburg") inputs.
+  // Isolate the "street + house" segment and IGNORE name/company lines.
+  // On a mail label the street line is the one that has a house number; the
+  // recipient name usually has no digits, so we pick the street line explicitly.
+  const hasLetters = (l) => /[a-zA-ZäöüÄÖÜß]/.test(l);
+  const hasHouseNo = (l) => /\d/.test(l);
+  const streetCandidates = lines.filter((l) => l !== pcLine && hasLetters(l) && hasHouseNo(l));
+
   let streetSegment;
-  if (postcode) {
+  if (streetCandidates.length) {
+    // The street sits just above the postcode line -> take the last candidate.
+    streetSegment = streetCandidates[streetCandidates.length - 1];
+  } else if (postcode && cleaned.indexOf(postcode) > 0) {
+    // Single-line "Street 9a, 17109 City": take everything before the postcode.
     streetSegment = cleaned.slice(0, cleaned.indexOf(postcode));
   } else {
-    // No postcode: take the part before the first comma, else the first line.
     streetSegment = cleaned.includes(',') ? cleaned.split(',')[0] : (lines[0] || cleaned);
   }
   streetSegment = streetSegment

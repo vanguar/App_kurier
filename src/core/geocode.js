@@ -52,48 +52,70 @@ export async function assessAddress(parsed) {
 let _lastNominatim = 0;
 const _geoCache = new Map();
 
+async function nominatim(paramsObj) {
+  const wait = 1100 - (Date.now() - _lastNominatim);
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  _lastNominatim = Date.now();
+  const params = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'de', ...paramsObj });
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  const arr = await res.json();
+  const hit = Array.isArray(arr) && arr[0];
+  return hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : null;
+}
+
 export async function onlineGeocode(parsed) {
   if (!parsed) return null;
   const key = parsed.matchKey || parsed.raw || '';
   if (_geoCache.has(key)) return _geoCache.get(key);
 
-  const wait = 1100 - (Date.now() - _lastNominatim);
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  _lastNominatim = Date.now();
-
-  const params = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'de' });
-  if (parsed.street && parsed.houseNumber) {
-    params.set('street', `${parsed.houseNumber}${parsed.houseLetter || ''} ${parsed.street}`.trim());
-    if (parsed.city) params.set('city', parsed.city);
-    if (parsed.postcode) params.set('postalcode', parsed.postcode);
-  } else {
-    params.set('q', parsed.raw || '');
-  }
-
+  let coords = null;
   try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
-      headers: { Accept: 'application/json' },
-    });
-    const arr = await res.json();
-    const hit = Array.isArray(arr) && arr[0];
-    const coords = hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : null;
-    _geoCache.set(key, coords);
-    return coords;
+    // 1) structured query (most precise)
+    if (parsed.street && parsed.houseNumber) {
+      coords = await nominatim({
+        street: `${parsed.houseNumber}${parsed.houseLetter || ''} ${parsed.street}`.trim(),
+        ...(parsed.city ? { city: parsed.city } : {}),
+        ...(parsed.postcode ? { postalcode: parsed.postcode } : {}),
+      });
+    }
+    // 2) free-text fallback (catches addresses the structured query misses)
+    if (!coords) {
+      const q = [
+        parsed.street ? `${parsed.street} ${parsed.houseNumber || ''}${parsed.houseLetter || ''}`.trim() : '',
+        parsed.postcode,
+        parsed.city,
+      ].filter(Boolean).join(' ').trim() || (parsed.raw || '');
+      if (q) coords = await nominatim({ q });
+    }
   } catch (e) {
-    return null;
+    coords = null;
   }
+  _geoCache.set(key, coords);
+  return coords;
 }
 
-// Convenience: parse + assess in one call. Falls back to online geocoding
-// (unless disabled) when the local index has no coordinates.
+// Parse + locate in one call, returning a result-driven confidence:
+//   green  — coordinates found (local index or online) -> routable
+//   yellow — parsed an address but not verified (offline / online disabled)
+//   red    — could not identify/locate an address -> needs a fix
 export async function geocodeRaw(raw, { online = true } = {}) {
   const parsed = parseAddress(raw);
   const assessment = await assessAddress(parsed);
-  if (!assessment.coords && online && navigator.onLine) {
-    const coords = await onlineGeocode(parsed);
-    if (coords) {
-      return { parsed, ...assessment, coords, confidence: 'green', reason: 'online' };
-    }
+  let coords = assessment.coords;
+
+  let triedOnline = false;
+  if (!coords && parsed.matchKey && online && navigator.onLine) {
+    triedOnline = true;
+    coords = await onlineGeocode(parsed);
   }
-  return { parsed, ...assessment };
+
+  let confidence;
+  if (coords) confidence = 'green';
+  else if (!parsed.matchKey) confidence = 'red'; // no recognizable street+house
+  else if (triedOnline) confidence = 'red'; // looked it up, nothing found -> fix it
+  else confidence = 'yellow'; // parsed but not verified (offline)
+
+  return { parsed, coords: coords || null, confidence, suggestion: assessment.suggestion, reason: assessment.reason };
 }
