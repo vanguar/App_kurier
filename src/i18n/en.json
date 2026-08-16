@@ -135,5 +135,7 @@
   "settings_priority": "Parcel priority",
   "settings_priority_hint": "Parcels are delivered before letters/magazines on near-ties. If mail is clearly closer, mail still goes first — no big detours for a parcel.",
   "priority_on": "Parcels first (on)",
-  "priority_off": "Off (shortest only)"
+  "priority_off": "Off (shortest only)",
+  "route_done_section": "Already delivered: {n}",
+  "route_all_done": "All stops delivered 🎉"
 }

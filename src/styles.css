@@ -216,6 +216,12 @@ body {
 .stop-badges { color: var(--muted); font-size: 14px; }
 .stop-go { font-size: 22px; }
 
+/* delivered stop: dimmed but still tappable (navigator still opens) */
+.stop.done { opacity: .5; }
+.stop.done .stop-addr { text-decoration: line-through; font-weight: 500; }
+.stop.done .stop-n { background: var(--muted); }
+.done-sep { margin-top: 14px; font-weight: 600; }
+
 /* navigator chooser sheet */
 .sheet-overlay {
   position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45);

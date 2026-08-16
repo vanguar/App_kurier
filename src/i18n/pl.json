@@ -135,5 +135,7 @@
   "settings_priority": "Priorytet paczek",
   "settings_priority_hint": "Przy zbliżonej odległości paczki są dostarczane przed listami/czasopismami. Jeśli poczta jest wyraźnie bliżej, idzie pierwsza — bez dużych objazdów dla paczki.",
   "priority_on": "Paczki najpierw (wł)",
-  "priority_off": "Wył (tylko najkrótsza)"
+  "priority_off": "Wył (tylko najkrótsza)",
+  "route_done_section": "Już dostarczone: {n}",
+  "route_all_done": "Wszystkie punkty dostarczone 🎉"
 }

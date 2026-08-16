@@ -853,14 +853,24 @@ async function renderRoute(main) {
     // A stop is "priority" if it holds at least one parcel (parcels beat mail on ties).
     const prioOn = settings.parcelPriority !== false;
     const hasParcel = (p) => Array.isArray(p.items) && p.items.some((i) => i.type === 'parcel');
+    // Only NOT-fully-delivered points are optimized into the active route. Delivered
+    // points drop out of the recalculation (so the count/route reflect what's left)
+    // but are still shown, dimmed, so the courier sees where they've already been.
+    const deliveredWithCoords = points.filter((p) => p.coords && pointStatus(p) === 'done');
     const stops = points
-      .filter((p) => p.coords)
+      .filter((p) => p.coords && pointStatus(p) !== 'done')
       .map((p) => ({ id: p.id, lat: p.coords.lat, lng: p.coords.lng, priority: prioOn && hasParcel(p) }));
-    const skippedNoCoord = points.filter((p) => !p.coords);
+    const skippedNoCoord = points.filter((p) => !p.coords && pointStatus(p) !== 'done');
 
     if (!stops.length) {
       clear(result);
-      result.appendChild(el('p', { class: 'warn', text: t('route_need_points') }));
+      if (deliveredWithCoords.length) {
+        // Nothing left to deliver — celebrate, but still list the done stops (dimmed).
+        result.appendChild(el('p', { class: 'route-sum', text: t('route_all_done') }));
+        renderDeliveredStops(result, deliveredWithCoords);
+      } else {
+        result.appendChild(el('p', { class: 'warn', text: t('route_need_points') }));
+      }
       return;
     }
 
@@ -895,7 +905,7 @@ async function renderRoute(main) {
       await putPoint(p);
     }
 
-    renderRouteResult(result, points, orderedIds, totalMeters, skippedNoCoord.length, byRoad);
+    renderRouteResult(result, points, orderedIds, totalMeters, skippedNoCoord.length, byRoad, deliveredWithCoords);
   });
 }
 
@@ -947,7 +957,7 @@ function navSheet(coords, label) {
   document.body.appendChild(overlay);
 }
 
-function renderRouteResult(result, points, orderedIds, totalMeters, skipped, byRoad) {
+function renderRouteResult(result, points, orderedIds, totalMeters, skipped, byRoad, delivered = []) {
   clear(result);
   const byId = new Map(points.map((p) => [p.id, p]));
   const km = (totalMeters / 1000).toFixed(1);
@@ -958,24 +968,40 @@ function renderRouteResult(result, points, orderedIds, totalMeters, skipped, byR
 
   orderedIds.forEach((id, i) => {
     const p = byId.get(id);
-    const counts = itemTypeCounts(p);
-    const badges = Object.entries(counts).filter(([, n]) => n > 0)
-      .map(([type, n]) => `${TYPE_EMOJI[type]}${n}`).join(' ');
-    const label = p.address.display || p.address.raw;
-    result.appendChild(el('button', {
-      class: 'stop', onclick: () => openNav(p.coords, label),
-    }, [
-      el('span', { class: 'stop-n', text: String(i + 1) }),
-      el('div', { class: 'stop-body' }, [
-        el('div', { class: 'stop-addr', text: label }),
-        el('div', { class: 'stop-badges', text: badges }),
-      ]),
-      el('span', { class: 'stop-go', text: '🧭' }),
-    ]));
+    result.appendChild(stopButton(p, String(i + 1)));
   });
 
   result.appendChild(el('div', { class: 'stop base', text: `🏁 ${t('route_base_end')}` }));
   if (skipped > 0) {
     result.appendChild(el('p', { class: 'warn', text: t('route_skipped', { n: skipped }) }));
   }
+  renderDeliveredStops(result, delivered);
+}
+
+// Build one route-stop button. Delivered stops render dimmed (a ✓ instead of a
+// number, address struck through) but stay tappable so the navigator still opens —
+// in case the courier needs to go back for something forgotten.
+function stopButton(p, indexLabel) {
+  const counts = itemTypeCounts(p);
+  const badges = Object.entries(counts).filter(([, n]) => n > 0)
+    .map(([type, n]) => `${TYPE_EMOJI[type]}${n}`).join(' ');
+  const label = p.address.display || p.address.raw;
+  const done = pointStatus(p) === 'done';
+  return el('button', {
+    class: 'stop' + (done ? ' done' : ''), onclick: () => openNav(p.coords, label),
+  }, [
+    el('span', { class: 'stop-n', text: done ? '✓' : indexLabel }),
+    el('div', { class: 'stop-body' }, [
+      el('div', { class: 'stop-addr', text: label }),
+      el('div', { class: 'stop-badges', text: badges }),
+    ]),
+    el('span', { class: 'stop-go', text: '🧭' }),
+  ]);
+}
+
+// Dimmed section listing already-delivered stops (kept visible for orientation).
+function renderDeliveredStops(result, delivered) {
+  if (!delivered || !delivered.length) return;
+  result.appendChild(el('p', { class: 'hint done-sep', text: t('route_done_section', { n: delivered.length }) }));
+  for (const p of delivered) result.appendChild(stopButton(p, '✓'));
 }

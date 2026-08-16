@@ -135,5 +135,7 @@
   "settings_priority": "Paket-Priorität",
   "settings_priority_hint": "Pakete werden bei fast gleicher Entfernung vor Briefen/Zeitschriften zugestellt. Ist Post deutlich näher, kommt sie zuerst — keine großen Umwege für ein Paket.",
   "priority_on": "Pakete zuerst (an)",
-  "priority_off": "Aus (nur kürzeste)"
+  "priority_off": "Aus (nur kürzeste)",
+  "route_done_section": "Bereits zugestellt: {n}",
+  "route_all_done": "Alle Stopps zugestellt 🎉"
 }
