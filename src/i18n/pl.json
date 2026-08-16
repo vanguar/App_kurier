@@ -16,6 +16,12 @@
   "onb_back": "Wstecz",
 
   "settings_title": "Ustawienia",
+  "settings_theme": "Motyw",
+  "theme_auto": "Auto",
+  "theme_light": "Jasny",
+  "theme_dark": "Ciemny",
+  "install_btn": "Zainstaluj na telefonie",
+  "install_ios": "Safari: przycisk Udostępnij → „Do ekranu początkowego”.",
   "settings_language": "Język interfejsu",
   "settings_base": "Adres Bazy (magazyn)",
   "settings_base_hint": "Start i koniec trasy. Podaj ulicę, numer i miasto.",

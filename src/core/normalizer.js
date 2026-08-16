@@ -70,23 +70,31 @@ export function parseAddress(raw) {
     city = after.replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
-  // Street line: first line that has a house number and is NOT the postcode line,
-  // else the first line.
-  const streetLine =
-    lines.find((l) => /\d/.test(l) && !/\b\d{5}\b/.test(l)) ||
-    lines.find((l) => l !== pcLine) ||
-    lines[0] ||
-    '';
+  // Isolate the "street + house" segment, stripping the postcode/city tail.
+  // Handles both single-line ("Neubrandenburger Straße 9a, 17109 Demmin")
+  // and multi-line ("Hauptstraße 12\n17033 Neubrandenburg") inputs.
+  let streetSegment;
+  if (postcode) {
+    streetSegment = cleaned.slice(0, cleaned.indexOf(postcode));
+  } else {
+    // No postcode: take the part before the first comma, else the first line.
+    streetSegment = cleaned.includes(',') ? cleaned.split(',')[0] : (lines[0] || cleaned);
+  }
+  streetSegment = streetSegment
+    .replace(/\n/g, ' ')
+    .replace(/[,;]+\s*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  const { streetPart, houseNumber, houseLetter } = splitHouse(streetLine);
+  const { streetPart, houseNumber, houseLetter } = splitHouse(streetSegment);
   const normStreet = normalizeStreetName(streetPart);
 
   const matchKey = normStreet
     ? `${normStreet}|${houseNumber}${houseLetter}`
     : '';
 
-  // Pretty display form: original street line, collapsed whitespace.
-  const display = streetLine.replace(/\s+/g, ' ').trim() || cleaned;
+  // Pretty display form: the cleaned "street + house" segment.
+  const display = streetSegment || cleaned;
 
   return {
     raw: cleaned,

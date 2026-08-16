@@ -32,10 +32,24 @@ export function uid() {
 
 // ---- settings (singleton) ----
 const DEFAULT_SETTINGS = {
-  base: null, // { address:{...}, coords:{lat,lng} }
+  // Pre-filled depot (route start/finish). User can change it in Settings.
+  base: {
+    address: {
+      street: 'Neubrandenburger Straße',
+      houseNumber: '9',
+      houseLetter: 'a',
+      postcode: '17109',
+      city: 'Demmin',
+      raw: 'Neubrandenburger Straße 9a, 17109 Demmin',
+      display: 'Neubrandenburger Straße 9a',
+      matchKey: 'neubrandenburgerstrasse|9a',
+    },
+    coords: { lat: 53.8924561, lng: 13.0401497 },
+  },
   routeType: 'closed',
   language: null, // resolved on first run
   distanceMetric: 'haversine',
+  theme: 'auto', // 'auto' | 'light' | 'dark'
   onboarded: false, // first-run welcome + Base wizard completed?
 };
 

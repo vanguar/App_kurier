@@ -13,12 +13,60 @@ import { recognize, splitIntoAddressBlocks } from '../ocr/ocr.js';
 let settings = null;
 const app = document.getElementById('app');
 
+// ---------- theme ----------
+function resolveTheme(theme) {
+  if (theme === 'light' || theme === 'dark') return theme;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function applyTheme(theme) {
+  const resolved = resolveTheme(theme);
+  document.documentElement.dataset.theme = resolved;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = resolved === 'dark' ? '#0f1319' : '#0b5cff';
+}
+
+// ---------- install (Add to Home Screen) ----------
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  if (settings) render(); // reveal the Install button once available
+});
+window.addEventListener('appinstalled', () => { deferredPrompt = null; });
+
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+async function doInstall() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  render();
+}
+// Returns an install button (Android), an iOS hint, or null if already installed.
+function installBlock() {
+  if (isStandalone()) return null;
+  if (deferredPrompt) {
+    return el('button', { class: 'btn install big', text: '📲 ' + t('install_btn'), onclick: doInstall });
+  }
+  if (isIOS()) return el('p', { class: 'hint', text: t('install_ios') });
+  return el('p', { class: 'hint', text: t('install_hint') });
+}
+
 // ---------- bootstrapping ----------
 export async function start() {
   settings = await getSettings();
   const lang = resolveInitialLang(settings.language);
   setLang(lang);
   if (!settings.language) settings = await saveSettings({ language: lang });
+  applyTheme(settings.theme);
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (settings.theme === 'auto') applyTheme('auto');
+  });
   window.addEventListener('hashchange', render);
   if (!settings.onboarded) {
     renderOnboarding(0);
@@ -60,6 +108,8 @@ function onbWelcome(wrap) {
     class: 'btn primary big', text: t('onb_start'),
     onclick: () => renderOnboarding(1),
   }));
+  const ib = installBlock();
+  if (ib) wrap.appendChild(ib);
 }
 
 function onbBase(wrap) {
@@ -78,10 +128,10 @@ function onbBase(wrap) {
   cont.addEventListener('click', async () => {
     const raw = input.value.trim();
     if (!raw) { input.focus(); return; }
+    const coords = await resolveBaseCoords(raw);
     const parsed = parseAddress(raw);
-    const geo = await assessAddress(parsed);
     settings = await saveSettings({
-      base: { address: { ...parsed }, coords: geo.coords || null },
+      base: { address: { ...parsed }, coords },
       onboarded: true,
     });
     location.hash = '#/import'; // land on scanning next
@@ -93,6 +143,18 @@ function onbBase(wrap) {
     class: 'link center', text: t('onb_back'),
     onclick: () => renderOnboarding(0),
   }));
+}
+
+// Resolve coordinates for the Base address. Try the local district index; if not
+// found, keep the previously known depot coords when the address is unchanged
+// (the depot often sits outside the delivery district the index covers).
+async function resolveBaseCoords(raw) {
+  const parsed = parseAddress(raw);
+  const geo = await assessAddress(parsed);
+  if (geo.coords) return geo.coords;
+  const prev = settings.base;
+  if (prev?.coords && prev.address?.raw === raw) return prev.coords;
+  return null;
 }
 
 const TYPE_LABELS = () => ({
@@ -146,6 +208,32 @@ function section(title) {
 async function renderSettings(main) {
   main.appendChild(section(t('settings_title')));
 
+  // Install to home screen
+  const ib = installBlock();
+  if (ib) main.appendChild(el('div', { class: 'card' }, [ib]));
+
+  // Theme
+  const themes = [
+    { code: 'auto', label: t('theme_auto') },
+    { code: 'light', label: t('theme_light') },
+    { code: 'dark', label: t('theme_dark') },
+  ];
+  main.appendChild(el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('settings_theme') }),
+    el('div', { class: 'langgrid' },
+      themes.map((th) =>
+        el('button', {
+          class: 'chip' + (settings.theme === th.code ? ' on' : ''),
+          onclick: async () => {
+            settings = await saveSettings({ theme: th.code });
+            applyTheme(th.code);
+            render();
+          },
+        }, th.label),
+      ),
+    ),
+  ]));
+
   // Language
   const langWrap = el('div', { class: 'card' }, [
     el('label', { class: 'field-label', text: t('settings_language') }),
@@ -179,14 +267,9 @@ async function renderSettings(main) {
       onclick: async () => {
         const raw = input.value.trim();
         if (!raw) return;
+        const coords = await resolveBaseCoords(raw);
         const parsed = parseAddress(raw);
-        const geo = await assessAddress(parsed);
-        settings = await saveSettings({
-          base: {
-            address: { ...parsed },
-            coords: geo.coords || null,
-          },
-        });
+        settings = await saveSettings({ base: { address: { ...parsed }, coords } });
         toast(t('settings_saved'));
         render();
       },

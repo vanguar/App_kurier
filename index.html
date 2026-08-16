@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#0b5cff" />
     <title>Kurier</title>
+    <script>
+      // Pre-paint theme (matches the 'auto' default) to avoid a flash;
+      // start() reconciles it with the saved preference right after boot.
+      (function () {
+        try {
+          var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

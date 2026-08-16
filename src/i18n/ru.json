@@ -16,6 +16,12 @@
   "onb_back": "Назад",
 
   "settings_title": "Настройки",
+  "settings_theme": "Тема оформления",
+  "theme_auto": "Авто",
+  "theme_light": "Светлая",
+  "theme_dark": "Тёмная",
+  "install_btn": "Установить на смартфон",
+  "install_ios": "Chrome/Safari: кнопка «Поделиться» → «На экран „Домой“».",
   "settings_language": "Язык интерфейса",
   "settings_base": "Адрес Базы (склад)",
   "settings_base_hint": "Старт и финиш маршрута. Введите улицу, дом и город.",

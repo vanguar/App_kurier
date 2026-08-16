@@ -16,6 +16,12 @@
   "onb_back": "Back",
 
   "settings_title": "Settings",
+  "settings_theme": "Theme",
+  "theme_auto": "Auto",
+  "theme_light": "Light",
+  "theme_dark": "Dark",
+  "install_btn": "Install on phone",
+  "install_ios": "Safari: Share button → “Add to Home Screen”.",
   "settings_language": "Interface language",
   "settings_base": "Base address (depot)",
   "settings_base_hint": "Route start and finish. Enter street, house and city.",
