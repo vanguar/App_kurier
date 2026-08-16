@@ -116,9 +116,74 @@ function orOpt(order, m) {
   return order;
 }
 
+// --- Parcel priority --------------------------------------------------------
+// Parcels matter more than letters/magazines, so a stop that has a parcel is
+// treated as if it were PRIORITY_FACTOR closer during optimization. Effect:
+// parcels win near-ties ("mail left, parcels right" or mail only slightly closer)
+// but the router still does mail first when that is clearly shorter — no big
+// detours just to reach a parcel. Real reported km always use true distances.
+const PRIORITY_FACTOR = 0.85; // ~15% tolerance in favor of parcel stops
+
+// Build the cost matrix the solver minimizes: real distances, but every edge
+// ARRIVING at a priority stop is discounted so the tour prefers reaching it sooner.
+function costMatrix(real, priority) {
+  const n = real.length;
+  const c = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++) {
+      c[i][j] = real[i][j] * (priority[j] ? PRIORITY_FACTOR : 1);
+    }
+  return c;
+}
+
+// Solve a closed-loop TSP from node 0 over a real-distance matrix. Parcel priority
+// is applied ONLY during greedy construction (nearest-neighbor on the discounted
+// cost), so a parcel wins the next-stop pick on a near-tie. The 2-opt/Or-opt polish
+// then runs on TRUE distances — it removes real crossings but does NOT fight a
+// near-tie (those swaps net ~0 km), so the parcel-first order survives, while a
+// genuinely shorter mail-first route is still chosen. Reports true tour length.
+function solveMatrix(real, priority) {
+  const n = real.length;
+  const cost = costMatrix(real, priority);
+  let order = nearestNeighbor(cost, n); // priority-biased construction
+  order = twoOpt(order, real);
+  order = orOpt(order, real);
+  order = twoOpt(order, real); // one more pass after Or-opt
+  return { order, totalMeters: tourLength(order, real) };
+}
+
+// Road-network optimization with parcel priority: pull a real road-distance matrix
+// from the public OSRM "table" service, then run our own priority-weighted solver.
+// Closed loop from Base. Throws on error so the caller can fall back. Nulls in the
+// matrix (unreachable pairs) are estimated from straight-line distance.
+// base: {lat,lng}, stops: [{id,lat,lng,priority}].
+export async function roadRoute(base, stops, { priority = true } = {}) {
+  const usable = stops.filter((s) => s && typeof s.lat === 'number' && typeof s.lng === 'number');
+  const skipped = stops.filter((s) => !(s && typeof s.lat === 'number' && typeof s.lng === 'number'));
+  if (!usable.length) return { orderedIds: [], totalMeters: 0, usableCount: 0, skipped };
+
+  const nodes = [{ lat: base.lat, lng: base.lng, id: '__base__', priority: false }, ...usable];
+  const coordStr = nodes.map((p) => `${p.lng},${p.lat}`).join(';');
+  const url = `https://router.project-osrm.org/table/v1/driving/${coordStr}?annotations=distance`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.code !== 'Ok' || !Array.isArray(data.distances)) {
+    throw new Error(data.message || 'OSRM table error');
+  }
+  // Sanitize: OSRM returns null for unreachable pairs — fall back to straight-line.
+  const real = data.distances.map((row, i) =>
+    row.map((v, j) => (typeof v === 'number' ? v : haversine(nodes[i], nodes[j]))),
+  );
+  const prio = nodes.map((nd) => (priority ? !!nd.priority : false));
+  const { order, totalMeters } = solveMatrix(real, prio);
+  const orderedIds = order.slice(1).map((idx) => nodes[idx].id);
+  return { orderedIds, totalMeters, usableCount: usable.length, skipped };
+}
+
 // Road-network optimization via the public OSRM "trip" service (solves TSP on real
-// roads, closed loop from Base). Throws on error so the caller can fall back to
-// the straight-line solver. base: {lat,lng}, stops: [{id,lat,lng}].
+// roads, closed loop from Base). No priority weighting — kept as a fallback for
+// roadRoute. Throws on error so the caller can fall back to the straight-line
+// solver. base: {lat,lng}, stops: [{id,lat,lng}].
 export async function roadTrip(base, stops) {
   const usable = stops.filter((s) => s && typeof s.lat === 'number' && typeof s.lng === 'number');
   const skipped = stops.filter((s) => !(s && typeof s.lat === 'number' && typeof s.lng === 'number'));
@@ -149,15 +214,11 @@ export function computeRoute(base, stops) {
     return { orderedIds: [], totalMeters: 0, usableCount: 0, skipped };
   }
 
-  const nodes = [{ lat: base.lat, lng: base.lng, id: '__base__' }, ...usable];
-  const m = buildMatrix(nodes);
+  const nodes = [{ lat: base.lat, lng: base.lng, id: '__base__', priority: false }, ...usable];
+  const real = buildMatrix(nodes);
+  const priority = nodes.map((nd) => !!nd.priority);
 
-  let order = nearestNeighbor(m, nodes.length);
-  order = twoOpt(order, m);
-  order = orOpt(order, m);
-  order = twoOpt(order, m); // one more pass after Or-opt
-
-  const totalMeters = tourLength(order, m);
+  const { order, totalMeters } = solveMatrix(real, priority);
   // Drop Base(0) from output; caller knows the loop starts & ends at Base.
   const orderedIds = order.slice(1).map((idx) => nodes[idx].id);
 

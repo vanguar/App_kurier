@@ -71,13 +71,18 @@ export async function preprocessImage(file, maxDim = 2000) {
   return canvas;
 }
 
-// Recognize text from a photo. onStatus(phase, progress) where phase is
-// 'loading' (model) or 'recognizing'.
+// Recognize text from a photo. Returns { text, lines } where each line carries
+// its vertical position (for visual splitting). onStatus(phase, progress).
 export async function recognize(file, onStatus) {
   const worker = await getWorker(onStatus);
   const canvas = await preprocessImage(file);
   const { data } = await worker.recognize(canvas);
-  return data.text || '';
+  const lines = (data.lines || []).map((l) => ({
+    text: (l.text || '').trim(),
+    top: l.bbox ? l.bbox.y0 : 0,
+    height: l.bbox ? (l.bbox.y1 - l.bbox.y0) : 0,
+  }));
+  return { text: data.text || '', lines };
 }
 
 // Downscale + JPEG-compress a photo, keeping color, for upload to a cloud OCR.
@@ -98,6 +103,8 @@ async function downscaleToBlob(file, maxDim = 1600, quality = 0.7) {
 
 // Cloud OCR via OCR.space (free API key, German model, high accuracy).
 // Get a free key at https://ocr.space/ocrapi/freekey
+// Returns { text, lines } — lines carry vertical position (MinTop/MaxHeight from
+// the text overlay) so a parcel list can be split on visual gaps, not just PLZ.
 export async function cloudRecognize(file, apiKey) {
   const blob = await downscaleToBlob(file);
   const form = new FormData();
@@ -107,6 +114,7 @@ export async function cloudRecognize(file, apiKey) {
   form.append('scale', 'true');
   form.append('detectOrientation', 'true');
   form.append('isTable', 'false');
+  form.append('isOverlayRequired', 'true'); // needed for per-line coordinates
   form.append('file', blob, 'scan.jpg');
 
   const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
@@ -115,7 +123,21 @@ export async function cloudRecognize(file, apiKey) {
     const msg = Array.isArray(data.ErrorMessage) ? data.ErrorMessage.join(' ') : (data.ErrorMessage || 'OCR error');
     throw new Error(msg);
   }
-  return (data.ParsedResults || []).map((r) => r.ParsedText || '').join('\n');
+  const results = data.ParsedResults || [];
+  const text = results.map((r) => r.ParsedText || '').join('\n');
+  const lines = [];
+  for (const r of results) {
+    const overlay = r.TextOverlay && r.TextOverlay.Lines;
+    if (!Array.isArray(overlay)) continue;
+    for (const ln of overlay) {
+      lines.push({
+        text: (ln.LineText || '').trim(),
+        top: typeof ln.MinTop === 'number' ? ln.MinTop : 0,
+        height: typeof ln.MaxHeight === 'number' ? ln.MaxHeight : 0,
+      });
+    }
+  }
+  return { text, lines };
 }
 
 // Split recognized text (a parcel LIST) into one block per recipient.
@@ -136,6 +158,59 @@ export function splitIntoAddressBlocks(text) {
   for (const line of lines) {
     current.push(line);
     if (isPostcodeLine(line)) {
+      blocks.push(current.join('\n'));
+      current = [];
+    }
+  }
+  if (current.length) blocks.push(current.join('\n'));
+
+  return blocks.filter(hasStreetish);
+}
+
+// Smarter list splitter that uses TWO markers to be sure where one address ends:
+//   1) the postcode line (5-digit PLZ) — the textual end of a German address, and
+//   2) a large VISUAL vertical gap between lines — official-app lists separate
+//      recipients with extra whitespace, so a gap noticeably bigger than the normal
+//      line spacing marks a boundary even when a PLZ was mis-read.
+// `lines` are positioned rows ({text, top, height}) from recognize()/cloudRecognize().
+// Falls back to postcode-only splitting when no geometry is available.
+export function splitAddresses(text, lines) {
+  const positioned = (lines || []).filter(
+    (l) => l && typeof l.top === 'number' && (l.text || '').trim().length,
+  );
+  if (positioned.length < 2) return splitIntoAddressBlocks(text);
+
+  const L = positioned
+    .map((l) => ({ text: l.text.trim(), top: l.top, height: l.height || 0 }))
+    .sort((a, b) => a.top - b.top);
+
+  const isPostcodeLine = (l) => /\b\d{5}\b/.test(l);
+  const hasStreetish = (b) => /[a-zA-ZäöüÄÖÜß]/.test(b) && /\d/.test(b);
+
+  // Gap between consecutive lines = top of next minus bottom of current.
+  const gaps = [];
+  for (let i = 0; i < L.length - 1; i++) {
+    gaps.push(Math.max(0, L[i + 1].top - (L[i].top + L[i].height)));
+  }
+  const median = (arr) => {
+    const s = arr.filter((v) => v > 0).sort((a, b) => a - b);
+    return s.length ? s[Math.floor(s.length / 2)] : 0;
+  };
+  const medGap = median(gaps);
+  const medHeight = median(L.map((l) => l.height));
+  // A boundary gap is clearly larger than the normal in-address line spacing.
+  const gapThreshold = Math.max(medGap * 1.8, medHeight * 0.8);
+  // Only trust gaps on a real list (protects a single-address parcel photo, where
+  // any accidental gap must not shatter one address into several).
+  const useGaps = L.length >= 6 && gapThreshold > 0;
+
+  const blocks = [];
+  let current = [];
+  for (let i = 0; i < L.length; i++) {
+    current.push(L[i].text);
+    const endsOnPostcode = isPostcodeLine(L[i].text);
+    const bigGapAfter = useGaps && i < L.length - 1 && gaps[i] > gapThreshold;
+    if (endsOnPostcode || bigGapAfter) {
       blocks.push(current.join('\n'));
       current = [];
     }

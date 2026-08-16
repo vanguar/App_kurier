@@ -55,6 +55,7 @@ const DEFAULT_SETTINGS = {
   ocrEngine: 'cloud', // 'device' (Tesseract, offline) | 'cloud' (OCR.space, accurate)
   ocrApiKey: '', // OCR.space free key (empty -> uses limited demo key)
   onlineGeocode: true, // look up coordinates online (OpenStreetMap) when local index misses
+  parcelPriority: true, // pull parcel stops earlier on near-ties (parcels beat mail)
   onboarded: false, // first-run welcome + Base wizard completed?
 };
 

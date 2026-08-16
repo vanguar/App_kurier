@@ -131,5 +131,9 @@
   "metric_straight": "Straight-line (offline)",
   "route_calc_road": "Computing road route…",
   "route_by_road": "Order optimized on real roads.",
-  "route_by_straight": "Order by straight-line (offline mode)."
+  "route_by_straight": "Order by straight-line (offline mode).",
+  "settings_priority": "Parcel priority",
+  "settings_priority_hint": "Parcels are delivered before letters/magazines on near-ties. If mail is clearly closer, mail still goes first — no big detours for a parcel.",
+  "priority_on": "Parcels first (on)",
+  "priority_off": "Off (shortest only)"
 }

@@ -131,5 +131,9 @@
   "metric_straight": "Luftlinie (offline)",
   "route_calc_road": "Berechne Straßenroute…",
   "route_by_road": "Reihenfolge auf echten Straßen optimiert.",
-  "route_by_straight": "Reihenfolge per Luftlinie (Offline-Modus)."
+  "route_by_straight": "Reihenfolge per Luftlinie (Offline-Modus).",
+  "settings_priority": "Paket-Priorität",
+  "settings_priority_hint": "Pakete werden bei fast gleicher Entfernung vor Briefen/Zeitschriften zugestellt. Ist Post deutlich näher, kommt sie zuerst — keine großen Umwege für ein Paket.",
+  "priority_on": "Pakete zuerst (an)",
+  "priority_off": "Aus (nur kürzeste)"
 }

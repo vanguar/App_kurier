@@ -131,5 +131,9 @@
   "metric_straight": "W linii prostej (offline)",
   "route_calc_road": "Liczę trasę po drogach…",
   "route_by_road": "Kolejność zoptymalizowana po realnych drogach.",
-  "route_by_straight": "Kolejność w linii prostej (tryb offline)."
+  "route_by_straight": "Kolejność w linii prostej (tryb offline).",
+  "settings_priority": "Priorytet paczek",
+  "settings_priority_hint": "Przy zbliżonej odległości paczki są dostarczane przed listami/czasopismami. Jeśli poczta jest wyraźnie bliżej, idzie pierwsza — bez dużych objazdów dla paczki.",
+  "priority_on": "Paczki najpierw (wł)",
+  "priority_off": "Wył (tylko najkrótsza)"
 }

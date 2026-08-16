@@ -7,8 +7,8 @@ import {
 import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress, onlineGeocode } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts } from '../core/matching.js';
-import { computeRoute, roadTrip } from '../core/route.js';
-import { recognize, cloudRecognize, splitIntoAddressBlocks, warmUp } from '../ocr/ocr.js';
+import { computeRoute, roadTrip, roadRoute } from '../core/route.js';
+import { recognize, cloudRecognize, splitAddresses, warmUp } from '../ocr/ocr.js';
 
 let settings = null;
 const app = document.getElementById('app');
@@ -311,6 +311,23 @@ async function renderSettings(main) {
     ]),
   ]));
 
+  // Parcel priority (pull parcel stops earlier on near-ties)
+  const prio = settings.parcelPriority !== false;
+  main.appendChild(el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('settings_priority') }),
+    el('p', { class: 'hint', text: t('settings_priority_hint') }),
+    el('div', { class: 'langgrid' }, [
+      el('button', {
+        class: 'chip' + (prio ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ parcelPriority: true }); render(); },
+      }, t('priority_on')),
+      el('button', {
+        class: 'chip' + (!prio ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ parcelPriority: false }); render(); },
+      }, t('priority_off')),
+    ]),
+  ]));
+
   // Default navigator
   const navs = [
     { code: 'ask', label: t('nav_ask') },
@@ -521,26 +538,27 @@ async function renderImport(main) {
   const handleFile = async (f) => {
     if (!f) return;
     let text = '';
+    let lines = [];
     try {
       if (useCloud) {
         progress.textContent = t('import_recognizing_cloud');
-        text = await cloudRecognize(f, settings.ocrApiKey);
+        ({ text, lines } = await cloudRecognize(f, settings.ocrApiKey));
       } else {
         progress.textContent = t('import_loading_engine', { p: 0 });
-        text = await recognize(f, (phase, p) => {
+        ({ text, lines } = await recognize(f, (phase, p) => {
           progress.textContent = phase === 'recognizing'
             ? t('import_recognizing', { p: Math.round(p * 100) })
             : t('import_loading_engine', { p: Math.round(p * 100) });
-        });
+        }));
       }
     } catch (e) {
       progress.textContent = (useCloud ? 'Cloud OCR: ' : 'OCR: ') + (e && e.message ? e.message : 'error');
       return;
     }
-    // PARCEL photo = a LIST -> split into many addresses.
+    // PARCEL photo = a LIST -> split into many addresses (by PLZ + visual gaps).
     // MAGAZINE/LETTER photo = exactly ONE address -> never split.
     const blocks = isList
-      ? splitIntoAddressBlocks(text)
+      ? splitAddresses(text, lines)
       : (text.trim() ? [text.trim()] : []);
     if (!blocks.length) {
       progress.textContent = t('import_no_text');
@@ -832,9 +850,12 @@ async function renderRoute(main) {
       }
     }
 
+    // A stop is "priority" if it holds at least one parcel (parcels beat mail on ties).
+    const prioOn = settings.parcelPriority !== false;
+    const hasParcel = (p) => Array.isArray(p.items) && p.items.some((i) => i.type === 'parcel');
     const stops = points
       .filter((p) => p.coords)
-      .map((p) => ({ id: p.id, lat: p.coords.lat, lng: p.coords.lng }));
+      .map((p) => ({ id: p.id, lat: p.coords.lat, lng: p.coords.lng, priority: prioOn && hasParcel(p) }));
     const skippedNoCoord = points.filter((p) => !p.coords);
 
     if (!stops.length) {
@@ -851,10 +872,16 @@ async function renderRoute(main) {
     const wantRoad = (settings.routeMetric || 'road') === 'road';
     if (wantRoad && navigator.onLine && stops.length <= 100) {
       status.textContent = t('route_calc_road');
+      // Prefer the priority-aware road solver (OSRM table + our TSP); if that
+      // endpoint fails, fall back to OSRM trip (no priority), then straight-line.
       try {
-        routed = await roadTrip(settings.base.coords, stops);
+        routed = await roadRoute(settings.base.coords, stops, { priority: prioOn });
       } catch (e) {
-        routed = null;
+        try {
+          routed = await roadTrip(settings.base.coords, stops);
+        } catch (e2) {
+          routed = null;
+        }
       }
     }
     const byRoad = !!routed;
