@@ -17,28 +17,33 @@ async function nuke() {
   } catch (e) { /* ignore */ }
 }
 
-// Freshness gate: compare the running build with the deployed version.json.
-// If the server is newer, nuke everything and hard-reload onto the fresh build.
-// Returns false when a reload was triggered (caller should stop).
-async function ensureFreshOrReload() {
+// Compare the running build with the deployed version.json. If the server is
+// newer, nuke everything and hard-reload onto the fresh build.
+async function checkFresh() {
   try {
     const url = `${import.meta.env.BASE_URL}version.json?ts=${Date.now()}`;
     const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return true;
+    if (!res.ok) return;
     const { build } = await res.json();
-    if (!build || build === RUNNING) return true;
+    if (!build || build === RUNNING) return;
 
-    // Guard against a reload loop if the freshly served index is still stale.
+    // Loop guard: don't re-nuke for the same build if the served index stays stale.
     const key = 'kurier_reloaded_for';
-    if (sessionStorage.getItem(key) === build) return true;
+    if (sessionStorage.getItem(key) === build) return;
     sessionStorage.setItem(key, build);
 
     await nuke();
     location.reload();
-    return false;
-  } catch (e) {
-    return true; // offline or blocked -> run from cache
-  }
+  } catch (e) { /* offline -> run from cache */ }
+}
+
+// Throttle so returning to the app fires at most one check every few seconds.
+let lastCheck = 0;
+function checkFreshThrottled() {
+  const now = Date.now();
+  if (now - lastCheck < 4000) return;
+  lastCheck = now;
+  checkFresh();
 }
 
 function registerServiceWorker() {
@@ -63,9 +68,33 @@ function registerServiceWorker() {
     .catch(() => {});
 }
 
+// Re-check for a new version whenever the app comes to the foreground
+// (switch back to it / unlock) — so "swap to the app" = latest version.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkFreshThrottled();
+});
+window.addEventListener('focus', checkFreshThrottled);
+window.addEventListener('pageshow', (e) => { if (e.persisted) checkFreshThrottled(); });
+
 (async function boot() {
-  const fresh = await ensureFreshOrReload();
-  if (!fresh) return; // reloading onto the new build
+  lastCheck = Date.now();
+  const url = `${import.meta.env.BASE_URL}version.json?ts=${Date.now()}`;
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (res.ok) {
+      const { build } = await res.json();
+      if (build && build !== RUNNING) {
+        const key = 'kurier_reloaded_for';
+        if (sessionStorage.getItem(key) !== build) {
+          sessionStorage.setItem(key, build);
+          await nuke();
+          location.reload();
+          return; // reloading onto the fresh build
+        }
+      }
+    }
+  } catch (e) { /* offline -> continue from cache */ }
+
   registerServiceWorker();
   start();
 })();
