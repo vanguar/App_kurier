@@ -116,40 +116,76 @@ function orOpt(order, m) {
   return order;
 }
 
-// --- Parcel priority --------------------------------------------------------
-// Parcels matter more than letters/magazines, so a stop that has a parcel is
-// treated as if it were PRIORITY_FACTOR closer during optimization. Effect:
-// parcels win near-ties ("mail left, parcels right" or mail only slightly closer)
-// but the router still does mail first when that is clearly shorter — no big
-// detours just to reach a parcel. Real reported km always use true distances.
-const PRIORITY_FACTOR = 0.85; // ~15% tolerance in favor of parcel stops
-
-// Build the cost matrix the solver minimizes: real distances, but every edge
-// ARRIVING at a priority stop is discounted so the tour prefers reaching it sooner.
-function costMatrix(real, priority) {
+// Solve a closed-loop TSP from node 0 over a real-distance matrix. Nearest-neighbor
+// seed + 2-opt/Or-opt polish, PLUS random restarts to escape local minima (cheap
+// for a courier's <=100 stops). Returns the best tour found and its true length.
+function solveMatrix(real) {
   const n = real.length;
-  const c = Array.from({ length: n }, () => new Array(n).fill(0));
-  for (let i = 0; i < n; i++)
-    for (let j = 0; j < n; j++) {
-      c[i][j] = real[i][j] * (priority[j] ? PRIORITY_FACTOR : 1);
+  const polish = (o) => {
+    o = twoOpt(o, real);
+    o = orOpt(o, real);
+    o = twoOpt(o, real); // one more pass after Or-opt
+    return o;
+  };
+  let best = polish(nearestNeighbor(real, n));
+  let bestLen = tourLength(best, real);
+
+  // Deterministic RNG so routes are stable/reproducible for the same input.
+  let seed = (0x9e3779b1 ^ (n * 2654435761)) & 0x7fffffff;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const restarts = n <= 12 ? 40 : n <= 40 ? 12 : 4;
+  for (let r = 0; r < restarts; r++) {
+    const rest = [];
+    for (let i = 1; i < n; i++) rest.push(i);
+    for (let i = rest.length - 1; i > 0; i--) { // Fisher-Yates shuffle (base stays at 0)
+      const j = Math.floor(rnd() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
     }
-  return c;
+    const cand = polish([0, ...rest]);
+    const len = tourLength(cand, real);
+    if (len < bestLen - 1e-6) { bestLen = len; best = cand; }
+  }
+  return { order: best, totalMeters: bestLen };
 }
 
-// Solve a closed-loop TSP from node 0 over a real-distance matrix. Parcel priority
-// is applied ONLY during greedy construction (nearest-neighbor on the discounted
-// cost), so a parcel wins the next-stop pick on a near-tie. The 2-opt/Or-opt polish
-// then runs on TRUE distances — it removes real crossings but does NOT fight a
-// near-tie (those swaps net ~0 km), so the parcel-first order survives, while a
-// genuinely shorter mail-first route is still chosen. Reports true tour length.
-function solveMatrix(real, priority) {
-  const n = real.length;
-  const cost = costMatrix(real, priority);
-  let order = nearestNeighbor(cost, n); // priority-biased construction
-  order = twoOpt(order, real);
-  order = orOpt(order, real);
-  order = twoOpt(order, real); // one more pass after Or-opt
-  return { order, totalMeters: tourLength(order, real) };
+// --- Parcel priority --------------------------------------------------------
+// Route quality comes first: we optimize pure distance, THEN nudge. This post-pass
+// pulls a parcel stop ahead of an immediately-preceding non-parcel (letter/magazine)
+// stop ONLY when doing so adds at most PRIORITY_TOLERANCE to that local 3-edge
+// segment. So parcels win near-ties ("mail left, parcels right" or mail only a
+// little closer), but a clearly shorter mail-first leg is never sacrificed — the
+// swap is rejected. Works on whatever real matrix the route used (road or straight),
+// so the tie-break is measured in the same metric that is reported to the user.
+const PRIORITY_TOLERANCE = 0.15; // accept <=15% local detour to serve a parcel earlier
+
+function reorderByPriority(order, real, priority) {
+  const n = order.length; // node 0 (base) sits at order[0]
+  const d = (a, b) => real[a][b];
+  let improved = true;
+  while (improved) {
+    improved = false;
+    for (let p = 1; p < n - 1; p++) {
+      const x = order[p];
+      const y = order[p + 1];
+      if (!(priority[y] && !priority[x])) continue; // only pull a parcel ahead of non-parcel
+      const a = order[p - 1];
+      const b = order[(p + 2) % n]; // wraps to base for the closing edge
+      // Near-tie test: from the current point a, reaching the parcel y first must be
+      // at most TOL farther than reaching the mail stop x first. This is the "mail a
+      // little closer -> still take the parcel" case; a parcel that is clearly farther
+      // fails here, so it is never dragged forward into a detour. The budget is a
+      // fraction of the SHORT next-step distance, not of the whole segment.
+      const budget = PRIORITY_TOLERANCE * d(a, x);
+      const nextStepPenalty = d(a, y) - d(a, x);
+      const loopPenalty = d(a, y) + d(x, b) - d(a, x) - d(y, b); // total added km if swapped
+      if (nextStepPenalty <= budget && loopPenalty <= budget) {
+        order[p] = y;
+        order[p + 1] = x;
+        improved = true;
+      }
+    }
+  }
+  return order;
 }
 
 // Road-network optimization with parcel priority: pull a real road-distance matrix
@@ -174,8 +210,10 @@ export async function roadRoute(base, stops, { priority = true } = {}) {
   const real = data.distances.map((row, i) =>
     row.map((v, j) => (typeof v === 'number' ? v : haversine(nodes[i], nodes[j]))),
   );
+  let { order } = solveMatrix(real); // shortest real-road loop first
   const prio = nodes.map((nd) => (priority ? !!nd.priority : false));
-  const { order, totalMeters } = solveMatrix(real, prio);
+  order = reorderByPriority(order, real, prio); // then nudge parcels earlier on ties
+  const totalMeters = tourLength(order, real);
   const orderedIds = order.slice(1).map((idx) => nodes[idx].id);
   return { orderedIds, totalMeters, usableCount: usable.length, skipped };
 }
@@ -218,7 +256,9 @@ export function computeRoute(base, stops) {
   const real = buildMatrix(nodes);
   const priority = nodes.map((nd) => !!nd.priority);
 
-  const { order, totalMeters } = solveMatrix(real, priority);
+  let { order } = solveMatrix(real); // shortest straight-line loop first
+  order = reorderByPriority(order, real, priority); // then nudge parcels earlier on ties
+  const totalMeters = tourLength(order, real);
   // Drop Base(0) from output; caller knows the loop starts & ends at Base.
   const orderedIds = order.slice(1).map((idx) => nodes[idx].id);
 
