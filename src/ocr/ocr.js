@@ -118,29 +118,31 @@ export async function cloudRecognize(file, apiKey) {
   return (data.ParsedResults || []).map((r) => r.ParsedText || '').join('\n');
 }
 
-// Split recognized text into candidate address blocks.
+// Split recognized text (a parcel LIST) into one block per recipient.
+// A German address ends with its postcode line (5-digit PLZ), so we group all
+// lines up to and including a postcode line into one address — this keeps
+// "Ernst-Thälmann-Str" and "18465 Tribsees" together instead of splitting them.
 export function splitIntoAddressBlocks(text) {
   const lines = text
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
+  const isPostcodeLine = (l) => /\b\d{5}\b/.test(l);
+  const hasStreetish = (b) => /[a-zA-ZäöüÄÖÜß]/.test(b) && /\d/.test(b);
+
   const blocks = [];
   let current = [];
-  const looksLikeStreet = (l) => /\d/.test(l) && /[a-zA-ZäöüÄÖÜß]/.test(l);
-
   for (const line of lines) {
-    if (current.length && looksLikeStreet(line)) {
-      if (current.some((x) => looksLikeStreet(x))) {
-        blocks.push(current.join('\n'));
-        current = [];
-      }
-    }
     current.push(line);
+    if (isPostcodeLine(line)) {
+      blocks.push(current.join('\n'));
+      current = [];
+    }
   }
   if (current.length) blocks.push(current.join('\n'));
 
-  return blocks.filter((b) => looksLikeStreet(b));
+  return blocks.filter(hasStreetish);
 }
 
 export async function terminate() {
