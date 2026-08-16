@@ -50,6 +50,7 @@ const DEFAULT_SETTINGS = {
   language: null, // resolved on first run
   distanceMetric: 'haversine',
   theme: 'auto', // 'auto' | 'light' | 'dark'
+  navigator: 'ask', // 'ask' | 'google' | 'waze' | 'geo'  (which map app to open a stop in)
   onboarded: false, // first-run welcome + Base wizard completed?
 };
 

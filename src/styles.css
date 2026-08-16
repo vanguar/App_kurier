@@ -213,6 +213,29 @@ body {
 .stop-badges { color: var(--muted); font-size: 14px; }
 .stop-go { font-size: 22px; }
 
+/* navigator chooser sheet */
+.sheet-overlay {
+  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.sheet {
+  width: 100%; max-width: 480px; background: var(--card); color: var(--ink);
+  border-radius: 18px 18px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  box-shadow: 0 -8px 30px rgba(0,0,0,.25);
+}
+.sheet-title {
+  font-weight: 700; text-align: center; padding: 6px 0 12px; color: var(--ink);
+  border-bottom: 1px solid var(--line); margin-bottom: 8px; word-break: break-word;
+}
+.sheet-opt {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 14px 10px; background: transparent; border: none; border-radius: 10px;
+  font-size: 17px; color: var(--ink); cursor: pointer; text-align: left; min-height: 52px;
+}
+.sheet-opt:active { background: var(--soft); }
+.so-ico { font-size: 22px; width: 28px; text-align: center; }
+.addr-nav { color: var(--brand); cursor: pointer; }
+
 /* toast */
 .toast {
   position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(20px);

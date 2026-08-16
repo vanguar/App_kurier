@@ -16,6 +16,12 @@
   "onb_back": "Wstecz",
 
   "settings_title": "Ustawienia",
+  "settings_nav": "Domyślna nawigacja",
+  "nav_ask": "Pytaj za każdym razem",
+  "nav_google": "Google Maps",
+  "nav_waze": "Waze",
+  "nav_other": "Inna (Organic Maps…)",
+  "nav_choose_title": "Otwórz w nawigacji",
   "settings_theme": "Motyw",
   "theme_auto": "Auto",
   "theme_light": "Jasny",

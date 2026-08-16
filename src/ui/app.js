@@ -234,6 +234,25 @@ async function renderSettings(main) {
     ),
   ]));
 
+  // Default navigator
+  const navs = [
+    { code: 'ask', label: t('nav_ask') },
+    { code: 'google', label: t('nav_google') },
+    { code: 'waze', label: t('nav_waze') },
+    { code: 'geo', label: t('nav_other') },
+  ];
+  main.appendChild(el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('settings_nav') }),
+    el('div', { class: 'langgrid' },
+      navs.map((nv) =>
+        el('button', {
+          class: 'chip' + ((settings.navigator || 'ask') === nv.code ? ' on' : ''),
+          onclick: async () => { settings = await saveSettings({ navigator: nv.code }); render(); },
+        }, nv.label),
+      ),
+    ),
+  ]));
+
   // Language
   const langWrap = el('div', { class: 'card' }, [
     el('label', { class: 'field-label', text: t('settings_language') }),
@@ -549,7 +568,11 @@ function pointCard(p) {
   return el('div', { class: `card point ${status}` }, [
     el('div', { class: 'point-head' }, [
       el('div', {}, [
-        el('div', { class: 'addr', text: p.address.display || p.address.raw }),
+        el('div', {
+          class: 'addr' + (p.coords ? ' addr-nav' : ''),
+          text: (p.coords ? '🧭 ' : '') + (p.address.display || p.address.raw),
+          onclick: p.coords ? () => openNav(p.coords, p.address.display || p.address.raw) : null,
+        }),
         p.address.city ? el('div', { class: 'city', text: `${p.address.postcode} ${p.address.city}`.trim() }) : null,
         !p.coords ? el('div', { class: 'nocoord', text: '⚠ ' + t('conf_yellow') }) : null,
       ]),
@@ -623,9 +646,52 @@ async function renderRoute(main) {
   });
 }
 
-function mapsLink(coords, label) {
-  const { lat, lng } = coords;
-  return `geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(label)})`;
+// ---------- navigation to a stop ----------
+const NAV_URLS = {
+  google: ({ lat, lng }) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
+  waze: ({ lat, lng }) => `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`,
+  geo: ({ lat, lng }, label) => `geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(label || '')})`,
+  apple: ({ lat, lng }) => `https://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`,
+};
+
+function openUrl(url) {
+  const a = el('a', { href: url, target: '_blank', rel: 'noopener' });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// Open a stop: use the preferred navigator, or show a chooser sheet when 'ask'.
+function openNav(coords, label) {
+  const pref = settings.navigator || 'ask';
+  if (pref !== 'ask' && NAV_URLS[pref]) {
+    openUrl(NAV_URLS[pref](coords, label));
+    return;
+  }
+  navSheet(coords, label);
+}
+
+function navSheet(coords, label) {
+  const overlay = el('div', {
+    class: 'sheet-overlay',
+    onclick: (e) => { if (e.target === overlay) overlay.remove(); },
+  });
+  const choose = (key) => { overlay.remove(); openUrl(NAV_URLS[key](coords, label)); };
+  const opt = (icon, text, key) =>
+    el('button', { class: 'sheet-opt', onclick: () => choose(key) }, [
+      el('span', { class: 'so-ico', text: icon }),
+      el('span', { text }),
+    ]);
+  const sheet = el('div', { class: 'sheet' }, [
+    el('div', { class: 'sheet-title', text: label || t('nav_choose_title') }),
+    opt('🗺️', t('nav_google'), 'google'),
+    opt('🚗', t('nav_waze'), 'waze'),
+    opt('🧭', t('nav_other'), 'geo'),
+    isIOS() ? opt('🍎', 'Apple Maps', 'apple') : null,
+    el('button', { class: 'btn', text: t('close'), onclick: () => overlay.remove() }),
+  ]);
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
 }
 
 function renderRouteResult(result, points, orderedIds, totalMeters, skipped) {
@@ -641,12 +707,13 @@ function renderRouteResult(result, points, orderedIds, totalMeters, skipped) {
     const counts = itemTypeCounts(p);
     const badges = Object.entries(counts).filter(([, n]) => n > 0)
       .map(([type, n]) => `${TYPE_EMOJI[type]}${n}`).join(' ');
-    result.appendChild(el('a', {
-      class: 'stop', href: mapsLink(p.coords, p.address.display || p.address.raw),
+    const label = p.address.display || p.address.raw;
+    result.appendChild(el('button', {
+      class: 'stop', onclick: () => openNav(p.coords, label),
     }, [
       el('span', { class: 'stop-n', text: String(i + 1) }),
       el('div', { class: 'stop-body' }, [
-        el('div', { class: 'stop-addr', text: p.address.display || p.address.raw }),
+        el('div', { class: 'stop-addr', text: label }),
         el('div', { class: 'stop-badges', text: badges }),
       ]),
       el('span', { class: 'stop-go', text: '🧭' }),

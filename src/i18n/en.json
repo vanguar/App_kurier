@@ -16,6 +16,12 @@
   "onb_back": "Back",
 
   "settings_title": "Settings",
+  "settings_nav": "Default navigator",
+  "nav_ask": "Ask each time",
+  "nav_google": "Google Maps",
+  "nav_waze": "Waze",
+  "nav_other": "Other (Organic Maps…)",
+  "nav_choose_title": "Open in navigator",
   "settings_theme": "Theme",
   "theme_auto": "Auto",
   "theme_light": "Light",

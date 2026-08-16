@@ -16,6 +16,12 @@
   "onb_back": "Назад",
 
   "settings_title": "Настройки",
+  "settings_nav": "Навигатор по умолчанию",
+  "nav_ask": "Спрашивать каждый раз",
+  "nav_google": "Google Maps",
+  "nav_waze": "Waze",
+  "nav_other": "Другой (Organic Maps…)",
+  "nav_choose_title": "Открыть в навигаторе",
   "settings_theme": "Тема оформления",
   "theme_auto": "Авто",
   "theme_light": "Светлая",

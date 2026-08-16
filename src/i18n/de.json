@@ -16,6 +16,12 @@
   "onb_back": "Zurück",
 
   "settings_title": "Einstellungen",
+  "settings_nav": "Standard-Navigation",
+  "nav_ask": "Jedes Mal fragen",
+  "nav_google": "Google Maps",
+  "nav_waze": "Waze",
+  "nav_other": "Andere (Organic Maps…)",
+  "nav_choose_title": "In Navigation öffnen",
   "settings_theme": "Design",
   "theme_auto": "Auto",
   "theme_light": "Hell",
