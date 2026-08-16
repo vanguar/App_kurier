@@ -405,6 +405,44 @@ async function renderSettings(main) {
 // ---------- Import / Scan ----------
 let importState = { type: 'parcel', rows: [] };
 
+// Add a typed/dictated address into the review list (same flow as OCR results).
+async function addManualRow(raw) {
+  const value = (raw || '').trim();
+  if (!value) return;
+  const g = await geocodeRaw(value);
+  const existing = new Set(importState.rows.map((r) => r.parsed.matchKey).filter(Boolean));
+  if (g.parsed.matchKey && existing.has(g.parsed.matchKey)) { toast(t('import_nothing')); return; }
+  importState.rows.push({
+    raw: value,
+    editStreet: g.parsed.display,
+    parsed: g.parsed,
+    confidence: g.confidence,
+    coords: g.coords,
+    suggestion: g.suggestion,
+    selected: true,
+  });
+  render();
+}
+
+// Voice dictation via the browser Speech API (German). onEnd resets UI state.
+function startVoice(targetInput, onEnd) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast(t('voice_unsupported')); if (onEnd) onEnd(); return; }
+  const rec = new SR();
+  rec.lang = 'de-DE'; // addresses are German regardless of UI language
+  rec.interimResults = true;
+  rec.continuous = false;
+  rec.maxAlternatives = 1;
+  rec.onresult = (e) => {
+    let txt = '';
+    for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+    targetInput.value = txt;
+  };
+  rec.onerror = () => { toast(t('voice_error')); };
+  rec.onend = () => { if (onEnd) onEnd(); };
+  try { rec.start(); } catch (e) { if (onEnd) onEnd(); }
+}
+
 async function renderImport(main) {
   main.appendChild(section(t('import_title')));
 
@@ -515,6 +553,36 @@ async function renderImport(main) {
       : null,
   ]);
   main.appendChild(photoCard);
+
+  // Manual / voice entry
+  const manualInput = el('input', {
+    class: 'input', type: 'text',
+    placeholder: t('import_manual_placeholder'),
+    autocapitalize: 'words', autocomplete: 'off',
+  });
+  const micBtn = el('button', { class: 'btn' });
+  const setMic = (listening) => {
+    micBtn.textContent = listening ? '🔴 ' + t('voice_listening') : '🎤 ' + t('voice_start');
+    micBtn.disabled = listening;
+  };
+  setMic(false);
+  micBtn.addEventListener('click', () => {
+    setMic(true);
+    startVoice(manualInput, () => setMic(false));
+  });
+  const manualCard = el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('import_manual_title') }),
+    el('p', { class: 'hint', text: t('import_manual_hint') }),
+    manualInput,
+    el('div', { class: 'btnrow' }, [
+      micBtn,
+      el('button', {
+        class: 'btn primary', text: t('import_manual_add'),
+        onclick: async () => { await addManualRow(manualInput.value); },
+      }),
+    ]),
+  ]);
+  main.appendChild(manualCard);
 
   if (importState.rows.length) main.appendChild(renderReview());
 }

@@ -109,5 +109,13 @@
   "ocr_device_hint": "Works offline but recognizes worse. For photos/screenshots prefer Cloud.",
   "import_recognizing_cloud": "Recognizing in the cloud…",
   "ocr_save_key": "Save key",
-  "ocr_key_saved": "Key saved ✓"
+  "ocr_key_saved": "Key saved ✓",
+  "import_manual_title": "Type or dictate an address",
+  "import_manual_hint": "If a photo won't work, type the address or dictate it. It joins the same review list.",
+  "import_manual_placeholder": "e.g. Hauptstraße 12a, 17033 Neubrandenburg",
+  "import_manual_add": "Add",
+  "voice_start": "Dictate",
+  "voice_listening": "Listening…",
+  "voice_unsupported": "Voice input is not supported in this browser.",
+  "voice_error": "Voice recognition error. Check the mic and internet."
 }

@@ -109,5 +109,13 @@
   "ocr_device_hint": "Offline nutzbar, aber schlechtere Erkennung. Für Fotos/Screenshots besser Cloud.",
   "import_recognizing_cloud": "Erkenne in der Cloud…",
   "ocr_save_key": "Key speichern",
-  "ocr_key_saved": "Key gespeichert ✓"
+  "ocr_key_saved": "Key gespeichert ✓",
+  "import_manual_title": "Adresse eingeben oder diktieren",
+  "import_manual_hint": "Wenn kein Foto klappt — Adresse eintippen oder diktieren. Kommt in dieselbe Prüfliste.",
+  "import_manual_placeholder": "z. B. Hauptstraße 12a, 17033 Neubrandenburg",
+  "import_manual_add": "Hinzufügen",
+  "voice_start": "Diktieren",
+  "voice_listening": "Höre zu…",
+  "voice_unsupported": "Spracheingabe wird in diesem Browser nicht unterstützt.",
+  "voice_error": "Spracherkennungsfehler. Mikrofon und Internet prüfen."
 }

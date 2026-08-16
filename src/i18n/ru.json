@@ -109,5 +109,13 @@
   "ocr_device_hint": "Работает офлайн, но распознаёт хуже. Для фото/скриншотов лучше «Облако».",
   "import_recognizing_cloud": "Распознаю в облаке…",
   "ocr_save_key": "Сохранить ключ",
-  "ocr_key_saved": "Ключ сохранён ✓"
+  "ocr_key_saved": "Ключ сохранён ✓",
+  "import_manual_title": "Ввести или продиктовать адрес",
+  "import_manual_hint": "Если фото не выходит — впишите адрес или продиктуйте голосом. Попадёт в тот же список сверки.",
+  "import_manual_placeholder": "напр. Hauptstraße 12a, 17033 Neubrandenburg",
+  "import_manual_add": "Добавить",
+  "voice_start": "Продиктовать",
+  "voice_listening": "Слушаю…",
+  "voice_unsupported": "Голосовой ввод не поддерживается в этом браузере.",
+  "voice_error": "Ошибка распознавания голоса. Проверьте микрофон и интернет."
 }

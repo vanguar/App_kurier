@@ -194,6 +194,8 @@ body {
 .itemrow.done .it-type { text-decoration: line-through; color: var(--muted); }
 .it-done { margin-left: auto; color: var(--green); font-size: 13px; }
 .addrow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.btnrow { display: flex; gap: 8px; }
+.btnrow .btn { flex: 1; }
 .card.point.done { opacity: .65; }
 
 /* route */
