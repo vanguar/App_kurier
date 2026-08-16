@@ -43,7 +43,11 @@ for (const e of elements) {
   const lng = e.lon ?? e.center?.lon;
   if (typeof lat !== 'number' || typeof lng !== 'number') continue;
 
-  const parsed = parseAddress(`${street} ${house}`);
+  // Feed the postcode/city too so the index key matches the app's postcode-aware
+  // matchKey (same street+house in different towns must stay distinct).
+  const pc = tags['addr:postcode'] || '';
+  const town = tags['addr:city'] || '';
+  const parsed = parseAddress(`${street} ${house}\n${pc} ${town}`.trim());
   if (!parsed.matchKey) continue;
 
   // First occurrence wins (avoids duplicate node/way for the same address).

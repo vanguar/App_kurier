@@ -96,8 +96,13 @@ export function parseAddress(raw) {
   const { streetPart, houseNumber, houseLetter } = splitHouse(streetSegment);
   const normStreet = normalizeStreetName(streetPart);
 
+  // matchKey decides "same point" AND is the online-geocode cache key. It MUST
+  // include the postcode when present, because the same street+house exists in many
+  // towns — without it, two different cities would collapse into one point (a real
+  // parcel dropped as a "duplicate") and share a cached coordinate. Postcode is more
+  // OCR-stable than the city name, so we key on it.
   const matchKey = normStreet
-    ? `${normStreet}|${houseNumber}${houseLetter}`
+    ? `${normStreet}|${houseNumber}${houseLetter}${postcode ? `|${postcode}` : ''}`
     : '';
 
   // Pretty display form: the cleaned "street + house" segment.
