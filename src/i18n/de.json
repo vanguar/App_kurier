@@ -99,5 +99,13 @@
   "import_btn_parcel": "Screenshot der Liste wählen",
   "import_btn_mail": "Adresse fotografieren",
   "import_hint_parcel": "PAKETE sind eine Liste. Machen Sie einen SCREENSHOT der Liste in der offiziellen App und wählen Sie ihn. Mehrere Screenshots möglich — Adressen sammeln sich, Duplikate entfallen.",
-  "import_hint_mail": "ZEITSCHRIFT/BRIEF — je EINE Adresse. Die Kamera öffnet sich — auf die Adresse richten."
+  "import_hint_mail": "ZEITSCHRIFT/BRIEF — je EINE Adresse. Die Kamera öffnet sich — auf die Adresse richten.",
+  "settings_ocr": "Erkennungs-Engine (OCR)",
+  "ocr_cloud": "Cloud (genau)",
+  "ocr_device": "Auf dem Gerät (offline)",
+  "ocr_key_hint": "Kostenlosen OCR.space-Key einfügen. Ohne Key wird ein begrenzter Demo-Modus genutzt.",
+  "ocr_get_key": "Kostenlosen Key holen →",
+  "ocr_cloud_warning": "Hinweis: Das Adressbild wird an OCR.space gesendet (Internet nötig).",
+  "ocr_device_hint": "Offline nutzbar, aber schlechtere Erkennung. Für Fotos/Screenshots besser Cloud.",
+  "import_recognizing_cloud": "Erkenne in der Cloud…"
 }

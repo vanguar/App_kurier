@@ -99,5 +99,13 @@
   "import_btn_parcel": "Wybierz zrzut listy",
   "import_btn_mail": "Sfotografuj adres",
   "import_hint_parcel": "PACZKI to lista. Zrób ZRZUT EKRANU listy w oficjalnej aplikacji i wybierz go. Można kilka zrzutów — adresy się zbiorą, duplikaty znikną.",
-  "import_hint_mail": "CZASOPISMO/LIST — po JEDNYM adresie. Otworzy się aparat — skieruj na adres przesyłki."
+  "import_hint_mail": "CZASOPISMO/LIST — po JEDNYM adresie. Otworzy się aparat — skieruj na adres przesyłki.",
+  "settings_ocr": "Silnik rozpoznawania (OCR)",
+  "ocr_cloud": "Chmura (dokładnie)",
+  "ocr_device": "Na urządzeniu (offline)",
+  "ocr_key_hint": "Wklej darmowy klucz OCR.space. Bez klucza działa ograniczone demo.",
+  "ocr_get_key": "Zdobądź darmowy klucz →",
+  "ocr_cloud_warning": "Uwaga: obraz adresu jest wysyłany do OCR.space (wymaga internetu).",
+  "ocr_device_hint": "Działa offline, ale gorzej rozpoznaje. Do zdjęć/zrzutów lepiej Chmura.",
+  "import_recognizing_cloud": "Rozpoznaję w chmurze…"
 }

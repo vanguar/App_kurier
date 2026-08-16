@@ -51,6 +51,8 @@ const DEFAULT_SETTINGS = {
   distanceMetric: 'haversine',
   theme: 'auto', // 'auto' | 'light' | 'dark'
   navigator: 'ask', // 'ask' | 'google' | 'waze' | 'geo'  (which map app to open a stop in)
+  ocrEngine: 'cloud', // 'device' (Tesseract, offline) | 'cloud' (OCR.space, accurate)
+  ocrApiKey: '', // OCR.space free key (empty -> uses limited demo key)
   onboarded: false, // first-run welcome + Base wizard completed?
 };
 

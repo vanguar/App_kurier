@@ -80,6 +80,44 @@ export async function recognize(file, onStatus) {
   return data.text || '';
 }
 
+// Downscale + JPEG-compress a photo, keeping color, for upload to a cloud OCR.
+// Keeps the request small (OCR.space free tier caps uploads at ~1 MB).
+async function downscaleToBlob(file, maxDim = 1600, quality = 0.7) {
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = bitmap;
+  const scale = Math.min(1, maxDim / Math.max(width, height));
+  const w = Math.max(1, Math.round(width * scale));
+  const h = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+}
+
+// Cloud OCR via OCR.space (free API key, German model, high accuracy).
+// Get a free key at https://ocr.space/ocrapi/freekey
+export async function cloudRecognize(file, apiKey) {
+  const blob = await downscaleToBlob(file);
+  const form = new FormData();
+  form.append('apikey', apiKey || 'helloworld');
+  form.append('language', 'ger');
+  form.append('OCREngine', '2'); // best general engine
+  form.append('scale', 'true');
+  form.append('detectOrientation', 'true');
+  form.append('isTable', 'false');
+  form.append('file', blob, 'scan.jpg');
+
+  const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
+  const data = await res.json();
+  if (data.IsErroredOnProcessing) {
+    const msg = Array.isArray(data.ErrorMessage) ? data.ErrorMessage.join(' ') : (data.ErrorMessage || 'OCR error');
+    throw new Error(msg);
+  }
+  return (data.ParsedResults || []).map((r) => r.ParsedText || '').join('\n');
+}
+
 // Split recognized text into candidate address blocks.
 export function splitIntoAddressBlocks(text) {
   const lines = text

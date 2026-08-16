@@ -99,5 +99,13 @@
   "import_btn_parcel": "Pick list screenshot",
   "import_btn_mail": "Photograph the address",
   "import_hint_parcel": "PARCELS are a list. Take a SCREENSHOT of the list in the official app and pick it. Several screenshots are fine — addresses accumulate, duplicates are removed.",
-  "import_hint_mail": "MAGAZINE/LETTER — ONE address each. The camera opens — point it at the mail address."
+  "import_hint_mail": "MAGAZINE/LETTER — ONE address each. The camera opens — point it at the mail address.",
+  "settings_ocr": "Recognition engine (OCR)",
+  "ocr_cloud": "Cloud (accurate)",
+  "ocr_device": "On-device (offline)",
+  "ocr_key_hint": "Paste a free OCR.space key. Without a key a limited demo mode is used.",
+  "ocr_get_key": "Get a free key →",
+  "ocr_cloud_warning": "Note: the address image is sent to the OCR.space service (needs internet).",
+  "ocr_device_hint": "Works offline but recognizes worse. For photos/screenshots prefer Cloud.",
+  "import_recognizing_cloud": "Recognizing in the cloud…"
 }

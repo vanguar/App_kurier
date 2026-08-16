@@ -8,7 +8,7 @@ import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts } from '../core/matching.js';
 import { computeRoute } from '../core/route.js';
-import { recognize, splitIntoAddressBlocks, warmUp } from '../ocr/ocr.js';
+import { recognize, cloudRecognize, splitIntoAddressBlocks, warmUp } from '../ocr/ocr.js';
 
 let settings = null;
 const app = document.getElementById('app');
@@ -212,6 +212,38 @@ async function renderSettings(main) {
   const ib = installBlock();
   if (ib) main.appendChild(el('div', { class: 'card' }, [ib]));
 
+  // OCR engine (accuracy vs offline)
+  const engine = settings.ocrEngine || 'cloud';
+  const keyInput = el('input', {
+    class: 'input', type: 'text', value: settings.ocrApiKey || '',
+    placeholder: 'OCR.space API key', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+  });
+  keyInput.addEventListener('change', async () => {
+    settings = await saveSettings({ ocrApiKey: keyInput.value.trim() });
+    toast(t('settings_saved'));
+  });
+  main.appendChild(el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('settings_ocr') }),
+    el('div', { class: 'langgrid' }, [
+      el('button', {
+        class: 'chip' + (engine === 'cloud' ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ ocrEngine: 'cloud' }); render(); },
+      }, t('ocr_cloud')),
+      el('button', {
+        class: 'chip' + (engine === 'device' ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ ocrEngine: 'device' }); render(); },
+      }, t('ocr_device')),
+    ]),
+    engine === 'cloud'
+      ? el('div', {}, [
+          el('p', { class: 'hint', text: t('ocr_key_hint') }),
+          keyInput,
+          el('a', { class: 'link', href: 'https://ocr.space/ocrapi/freekey', target: '_blank', rel: 'noopener', text: t('ocr_get_key') }),
+          el('p', { class: 'warn', text: t('ocr_cloud_warning') }),
+        ])
+      : el('p', { class: 'hint', text: t('ocr_device_hint') }),
+  ]));
+
   // Theme
   const themes = [
     { code: 'auto', label: t('theme_auto') },
@@ -370,15 +402,19 @@ let importState = { type: 'parcel', rows: [] };
 async function renderImport(main) {
   main.appendChild(section(t('import_title')));
 
-  // Warm up the OCR engine as soon as the Scan screen opens, so the model
-  // download/init is not paid mid-scan. Progress is reflected in the hint below.
-  warmUp((phase, p) => {
-    if (importState.rows.length) return; // don't clobber the review view
-    const el2 = document.getElementById('ocr-status');
-    if (!el2) return;
-    if (phase === 'loading' && p < 1) el2.textContent = t('import_loading_engine', { p: Math.round(p * 100) });
-    else if (phase === 'loading') el2.textContent = t('import_engine_ready');
-  });
+  const useCloud = (settings.ocrEngine || 'cloud') === 'cloud';
+
+  // For the on-device engine, warm it up when the Scan screen opens so the model
+  // download/init is not paid mid-scan. Cloud engine needs no warm-up.
+  if (!useCloud) {
+    warmUp((phase, p) => {
+      if (importState.rows.length) return;
+      const el2 = document.getElementById('ocr-status');
+      if (!el2) return;
+      if (phase === 'loading' && p < 1) el2.textContent = t('import_loading_engine', { p: Math.round(p * 100) });
+      else if (phase === 'loading') el2.textContent = t('import_engine_ready');
+    });
+  }
 
   // Type selector
   const typeSel = el('div', { class: 'card' }, [
@@ -405,19 +441,28 @@ async function renderImport(main) {
   photo.addEventListener('change', async () => {
     const f = photo.files[0];
     if (!f) return;
-    progress.textContent = t('import_loading_engine', { p: 0 });
     let text = '';
     try {
-      text = await recognize(f, (phase, p) => {
-        progress.textContent = phase === 'recognizing'
-          ? t('import_recognizing', { p: Math.round(p * 100) })
-          : t('import_loading_engine', { p: Math.round(p * 100) });
-      });
+      if (useCloud) {
+        progress.textContent = t('import_recognizing_cloud');
+        text = await cloudRecognize(f, settings.ocrApiKey);
+      } else {
+        progress.textContent = t('import_loading_engine', { p: 0 });
+        text = await recognize(f, (phase, p) => {
+          progress.textContent = phase === 'recognizing'
+            ? t('import_recognizing', { p: Math.round(p * 100) })
+            : t('import_loading_engine', { p: Math.round(p * 100) });
+        });
+      }
     } catch (e) {
-      progress.textContent = 'OCR error';
+      progress.textContent = (useCloud ? 'Cloud OCR: ' : 'OCR: ') + (e && e.message ? e.message : 'error');
       return;
     }
-    const blocks = splitIntoAddressBlocks(text);
+    // PARCEL photo = a LIST -> split into many addresses.
+    // MAGAZINE/LETTER photo = exactly ONE address -> never split.
+    const blocks = isList
+      ? splitIntoAddressBlocks(text)
+      : (text.trim() ? [text.trim()] : []);
     photo.value = ''; // allow re-picking the same file / taking the next photo
     if (!blocks.length) {
       progress.textContent = t('import_no_text');
