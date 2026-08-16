@@ -107,5 +107,7 @@
   "ocr_get_key": "Kostenlosen Key holen →",
   "ocr_cloud_warning": "Hinweis: Das Adressbild wird an OCR.space gesendet (Internet nötig).",
   "ocr_device_hint": "Offline nutzbar, aber schlechtere Erkennung. Für Fotos/Screenshots besser Cloud.",
-  "import_recognizing_cloud": "Erkenne in der Cloud…"
+  "import_recognizing_cloud": "Erkenne in der Cloud…",
+  "ocr_save_key": "Key speichern",
+  "ocr_key_saved": "Key gespeichert ✓"
 }

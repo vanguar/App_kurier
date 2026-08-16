@@ -218,10 +218,12 @@ async function renderSettings(main) {
     class: 'input', type: 'text', value: settings.ocrApiKey || '',
     placeholder: 'OCR.space API key', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
   });
-  keyInput.addEventListener('change', async () => {
+  const saveKey = async () => {
     settings = await saveSettings({ ocrApiKey: keyInput.value.trim() });
     toast(t('settings_saved'));
-  });
+    render();
+  };
+  keyInput.addEventListener('change', saveKey); // autosave on blur too
   main.appendChild(el('div', { class: 'card' }, [
     el('label', { class: 'field-label', text: t('settings_ocr') }),
     el('div', { class: 'langgrid' }, [
@@ -238,6 +240,10 @@ async function renderSettings(main) {
       ? el('div', {}, [
           el('p', { class: 'hint', text: t('ocr_key_hint') }),
           keyInput,
+          el('button', { class: 'btn primary', text: t('ocr_save_key'), onclick: saveKey }),
+          settings.ocrApiKey
+            ? el('p', { class: 'ok', text: t('ocr_key_saved') })
+            : null,
           el('a', { class: 'link', href: 'https://ocr.space/ocrapi/freekey', target: '_blank', rel: 'noopener', text: t('ocr_get_key') }),
           el('p', { class: 'warn', text: t('ocr_cloud_warning') }),
         ])

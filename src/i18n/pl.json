@@ -107,5 +107,7 @@
   "ocr_get_key": "Zdobądź darmowy klucz →",
   "ocr_cloud_warning": "Uwaga: obraz adresu jest wysyłany do OCR.space (wymaga internetu).",
   "ocr_device_hint": "Działa offline, ale gorzej rozpoznaje. Do zdjęć/zrzutów lepiej Chmura.",
-  "import_recognizing_cloud": "Rozpoznaję w chmurze…"
+  "import_recognizing_cloud": "Rozpoznaję w chmurze…",
+  "ocr_save_key": "Zapisz klucz",
+  "ocr_key_saved": "Klucz zapisany ✓"
 }
