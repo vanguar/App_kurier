@@ -55,32 +55,75 @@ export function normalizeStreetName(streetPart) {
   return s;
 }
 
+// --- Street-line detection (content-based, position-independent) ------------
+// A shipping label / list can carry lines that LOOK like a street but are not
+// ("Brief 3", "Sendung 12345", "Absender ...", "auch Paket"). Instead of guessing
+// by position (above/below the postcode), we SCORE every line by how address-like
+// it is and pick the best one — so the real street wins wherever it is printed.
+const NON_STREET_WORDS = /\b(brief(e)?|paket(e)?|p(ä|ae)ckchen|sendung\w*|zeitschrift(en)?|zeitung(en)?|magazin(e)?|absender|empf(ä|ae)nger|kunden?\w*|nummer|nr|tel(efon)?|fax|rechnung\w*|bestell\w*|auftrag\w*|datum|seite|blatt|barcode|code|referenz|auch|screenshot|scan)\b/i;
+// German street "Grundwörter" (word endings) + locational prefixes: strong signals
+// a line really is a street, even with no postcode nearby.
+const STREET_SUFFIX = /(stra(ß|ss)e|str|weg|allee|platz|ring|damm|ufer|gasse|steig|steg|chaussee|graben|markt|anger|wall|hof|kamp|koppel|redder|twiete|reihe|zeile|winkel|kehre|pfad|promenade|berg|feld|br(ü|ue)cke|tor)$/i;
+const STREET_PREFIX = /^(am|an|auf|bei|beim|hinter|im|in|vor|zum|zur|zu|neben|unter)\b/i;
+
+function scoreStreetLine(text) {
+  const t = text.trim();
+  const nameOnly = t.replace(/[\s.,]*\d+\s*[a-zA-Z]?\s*$/, '').trim(); // drop trailing house no.
+  const words = nameOnly.split(/\s+/).filter(Boolean);
+  const lastWord = words[words.length - 1] || '';
+  let score = 0;
+  if (NON_STREET_WORDS.test(t)) score -= 100;                                    // caption/meta junk
+  if (STREET_SUFFIX.test(lastWord) || STREET_PREFIX.test(nameOnly)) score += 10; // real street word
+  if (/\d+\s*[a-zA-Z]?$/.test(t)) score += 3;                                    // ends with a house number
+  score += Math.min(nameOnly.replace(/[^a-zA-ZäöüÄÖÜß]/g, '').length, 12) * 0.1; // has an actual name
+  return score;
+}
+
 // Parse a raw address (one or more lines) into structured parts + matchKey.
 export function parseAddress(raw) {
   const cleaned = (raw || '').replace(/\r/g, '').trim();
   const lines = cleaned.split('\n').map((l) => l.trim()).filter(Boolean);
 
-  const postcode = extractPostcode(cleaned);
-
-  // City: the token(s) after the postcode, if any.
+  // Postcode + city. A German PLZ is 5 digits FOLLOWED BY a city on the same line,
+  // so prefer a "PLZ City" line — that way a stray 5-digit number (customer or
+  // tracking no. like "Kundennummer 44823") is not mistaken for the postcode.
+  // Fall back to any 5-digit group only if no "PLZ City" line exists.
+  const PLZ_CITY = /\b(\d{5})\s+([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß.\- ]*)/;
+  let pcLine = null;
+  let postcode = '';
   let city = '';
-  const pcLine = lines.find((l) => /\b\d{5}\b/.test(l));
-  if (pcLine) {
-    const after = pcLine.split(/\b\d{5}\b/)[1] || '';
-    city = after.replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
+  for (const l of lines) {
+    const m = l.match(PLZ_CITY);
+    if (m) { pcLine = l; postcode = m[1]; city = m[2].replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim(); break; }
   }
+  if (!pcLine) {
+    pcLine = lines.find((l) => /\b\d{5}\b/.test(l)) || null;
+    if (pcLine) {
+      const m = pcLine.match(/\b(\d{5})\b/);
+      postcode = m ? m[1] : '';
+      city = (pcLine.split(/\b\d{5}\b/)[1] || '').replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+  }
+  if (!postcode) postcode = extractPostcode(cleaned);
 
   // Isolate the "street + house" segment and IGNORE name/company lines.
   // On a mail label the street line is the one that has a house number; the
   // recipient name usually has no digits, so we pick the street line explicitly.
   const hasLetters = (l) => /[a-zA-ZäöüÄÖÜß]/.test(l);
   const hasHouseNo = (l) => /\d/.test(l);
-  const streetCandidates = lines.filter((l) => l !== pcLine && hasLetters(l) && hasHouseNo(l));
+  const pcIndex = pcLine ? lines.indexOf(pcLine) : -1;
+  // Score every line that could be a street (has letters + a number, not the PLZ line)
+  // and take the most address-like one. Position on the label does NOT matter — junk
+  // like "Brief 3" / "Sendung 12345" / "Absender ..." is scored out by content.
+  const streetCandidates = lines
+    .map((l, idx) => ({ l, idx }))
+    .filter((c) => c.idx !== pcIndex && hasLetters(c.l) && hasHouseNo(c.l))
+    .map((c) => ({ ...c, score: scoreStreetLine(c.l) }))
+    .sort((a, b) => b.score - a.score || b.l.length - a.l.length);
 
   let streetSegment;
   if (streetCandidates.length) {
-    // The street sits just above the postcode line -> take the last candidate.
-    streetSegment = streetCandidates[streetCandidates.length - 1];
+    streetSegment = streetCandidates[0].l; // best-scoring line wins
   } else if (postcode && cleaned.indexOf(postcode) > 0) {
     // Single-line "Street 9a, 17109 City": take everything before the postcode.
     streetSegment = cleaned.slice(0, cleaned.indexOf(postcode));

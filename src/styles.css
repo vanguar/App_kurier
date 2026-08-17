@@ -212,6 +212,8 @@ body {
 .btnrow { display: flex; gap: 8px; }
 .btnrow .btn { flex: 1; }
 .card.point.done { opacity: .65; }
+.points-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 4px 10px; }
+.points-actions .btn.sm { flex: 0 0 auto; width: auto; }
 
 /* route */
 .route-sum { font-weight: 600; margin: 6px 4px 12px; color: var(--ink); }

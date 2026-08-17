@@ -556,10 +556,17 @@ async function renderImport(main) {
       return;
     }
     // PARCEL photo = a LIST -> split into many addresses (by PLZ + visual gaps).
-    // MAGAZINE/LETTER photo = exactly ONE address -> never split.
-    const blocks = isList
-      ? splitAddresses(text, lines)
-      : (text.trim() ? [text.trim()] : []);
+    // MAGAZINE/LETTER photo = ONE address. If the shot accidentally caught two,
+    // split them and keep the TOP real address block — i.e. the topmost block that
+    // actually carries a postcode (so a caption/junk block above it is skipped).
+    let blocks;
+    if (isList) {
+      blocks = splitAddresses(text, lines);
+    } else {
+      const mail = splitAddresses(text, lines);
+      const top = mail.find((b) => /\b\d{5}\b/.test(b)) || mail[0];
+      blocks = top ? [top] : (text.trim() ? [text.trim()] : []);
+    }
     if (!blocks.length) {
       progress.textContent = t('import_no_text');
       render();
@@ -727,7 +734,15 @@ async function renderPoints(main) {
     main.appendChild(el('p', { class: 'empty', text: t('points_empty') }));
     return;
   }
-  main.appendChild(el('p', { class: 'hint', text: t('points_count', { n: points.length }) }));
+  main.appendChild(el('div', { class: 'points-actions' }, [
+    el('span', { class: 'hint', text: t('points_count', { n: points.length }) }),
+    el('button', {
+      class: 'btn danger sm', text: '🗑 ' + t('settings_clear_points'),
+      onclick: async () => {
+        if (confirm(t('settings_clear_confirm'))) { await clearPoints(); toast('OK'); render(); }
+      },
+    }),
+  ]));
 
   points.sort((a, b) => (a.routeOrder ?? 1e9) - (b.routeOrder ?? 1e9) || a.createdAt - b.createdAt);
 
