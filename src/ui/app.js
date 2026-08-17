@@ -811,7 +811,7 @@ function itemRow(p, it) {
     await putPoint(p);
     render();
   });
-  return el('label', { class: 'itemrow' + (done ? ' done' : '') }, [
+  return el('label', { class: `itemrow ${it.type}` + (done ? ' done' : '') }, [
     cb,
     el('span', { class: 'it-type', text: `${TYPE_EMOJI[it.type]} ${TYPE_LABELS()[it.type]}` }),
     done ? el('span', { class: 'it-done', text: t('point_delivered') }) : null,
@@ -978,25 +978,44 @@ function renderRouteResult(result, points, orderedIds, totalMeters, skipped, byR
   renderDeliveredStops(result, delivered);
 }
 
-// Build one route-stop button. Delivered stops render dimmed (a ✓ instead of a
-// number, address struck through) but stay tappable so the navigator still opens —
-// in case the courier needs to go back for something forgotten.
+// Build one route stop as a BLOCK per address: a tappable header (opens the
+// navigator) plus one color-coded row per delivery (parcel / magazine / letter),
+// so several items at the same building read as one block with separated items.
+// Delivered stops render dimmed (a ✓ instead of a number, address struck through)
+// but stay tappable, in case the courier needs to go back for something forgotten.
 function stopButton(p, indexLabel) {
-  const counts = itemTypeCounts(p);
-  const badges = Object.entries(counts).filter(([, n]) => n > 0)
-    .map(([type, n]) => `${TYPE_EMOJI[type]}${n}`).join(' ');
   const label = p.address.display || p.address.raw;
   const done = pointStatus(p) === 'done';
-  return el('button', {
-    class: 'stop' + (done ? ' done' : ''), onclick: () => openNav(p.coords, label),
+  const labels = TYPE_LABELS();
+
+  const head = el('button', {
+    class: 'stop-head', onclick: () => openNav(p.coords, label),
   }, [
     el('span', { class: 'stop-n', text: done ? '✓' : indexLabel }),
     el('div', { class: 'stop-body' }, [
       el('div', { class: 'stop-addr', text: label }),
-      el('div', { class: 'stop-badges', text: badges }),
+      p.address.city
+        ? el('div', { class: 'stop-city', text: `${p.address.postcode} ${p.address.city}`.trim() })
+        : null,
     ]),
     el('span', { class: 'stop-go', text: '🧭' }),
   ]);
+
+  // One row per item so each parcel/letter/magazine is visually separated even
+  // when several sit at the same address.
+  const items = el('div', { class: 'stop-items' },
+    p.items.map((it) => {
+      const idone = it.status === 'delivered';
+      return el('div', { class: `stop-item ${it.type}` + (idone ? ' done' : '') }, [
+        el('span', { class: 'si-ico', text: TYPE_EMOJI[it.type] }),
+        el('span', { class: 'si-type', text: labels[it.type] }),
+        it.note ? el('span', { class: 'si-note', text: it.note }) : null,
+        idone ? el('span', { class: 'si-done', text: '✓ ' + t('point_delivered') }) : null,
+      ]);
+    }),
+  );
+
+  return el('div', { class: 'stop' + (done ? ' done' : '') }, [head, items]);
 }
 
 // Dimmed section listing already-delivered stops (kept visible for orientation).

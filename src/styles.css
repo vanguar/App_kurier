@@ -23,6 +23,11 @@
   --tint-total: #eef7ee;
   --tint-base: #eef3ff;
 
+  /* accent color per delivery type (parcel / magazine / letter) */
+  --type-parcel: #0b5cff;    /* blue  */
+  --type-magazine: #c2680a;  /* amber */
+  --type-letter: #1a7f3c;    /* green */
+
   --radius: 14px;
 }
 
@@ -48,6 +53,10 @@
   --tint-mail: #34291a;
   --tint-total: #17301f;
   --tint-base: #1b2740;
+
+  --type-parcel: #7aa5ff;
+  --type-magazine: #f5a623;
+  --type-letter: #4ade80;
 }
 
 /* ---------- Base ---------- */
@@ -189,7 +198,13 @@ body {
 .tb.magazine { background: var(--tint-mail); }
 .tb.letter { background: var(--tint-total); }
 .items { margin: 10px 0; }
-.itemrow { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-top: 1px solid var(--line); }
+.itemrow {
+  display: flex; align-items: center; gap: 10px; padding: 10px 4px 10px 10px;
+  border-top: 1px solid var(--line); border-left: 4px solid var(--line);
+}
+.itemrow.parcel   { border-left-color: var(--type-parcel); }
+.itemrow.magazine { border-left-color: var(--type-magazine); }
+.itemrow.letter   { border-left-color: var(--type-letter); }
 .itemrow input { width: 24px; height: 24px; }
 .itemrow.done .it-type { text-decoration: line-through; color: var(--muted); }
 .it-done { margin-left: auto; color: var(--green); font-size: 13px; }
@@ -200,12 +215,20 @@ body {
 
 /* route */
 .route-sum { font-weight: 600; margin: 6px 4px 12px; color: var(--ink); }
+/* A stop is a BLOCK per address: a tappable header + one colored row per delivery. */
 .stop {
-  display: flex; align-items: center; gap: 10px; background: var(--card);
-  border: 1px solid var(--line); border-radius: 10px; padding: 12px;
-  margin-bottom: 8px; text-decoration: none; color: var(--ink);
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; margin-bottom: 8px; color: var(--ink);
 }
-.stop.base { background: var(--tint-base); font-weight: 600; justify-content: center; }
+.stop.base {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--tint-base); font-weight: 600;
+}
+.stop-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: none; padding: 0; margin: 0;
+  color: var(--ink); text-align: left; font: inherit; cursor: pointer;
+}
 .stop-n {
   width: 30px; height: 30px; flex: 0 0 30px; border-radius: 50%;
   background: var(--brand); color: var(--brand-ink); display: flex; align-items: center;
@@ -213,11 +236,27 @@ body {
 }
 .stop-body { flex: 1; min-width: 0; }
 .stop-addr { font-weight: 600; }
-.stop-badges { color: var(--muted); font-size: 14px; }
+.stop-city { color: var(--muted); font-size: 13px; }
 .stop-go { font-size: 22px; }
 
+/* per-delivery rows inside a stop, separated and colored by type */
+.stop-items { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.stop-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-radius: 8px; border-left: 4px solid var(--line);
+  background: var(--soft); font-size: 14px;
+}
+.stop-item .si-type { font-weight: 600; }
+.stop-item .si-note { color: var(--muted); font-size: 13px; }
+.stop-item .si-done { margin-left: auto; color: var(--green); font-size: 13px; }
+.stop-item.parcel   { border-left-color: var(--type-parcel);   background: var(--tint-parcel); }
+.stop-item.magazine { border-left-color: var(--type-magazine); background: var(--tint-mail); }
+.stop-item.letter   { border-left-color: var(--type-letter);   background: var(--tint-total); }
+.stop-item.done { opacity: .55; }
+.stop-item.done .si-type { text-decoration: line-through; }
+
 /* delivered stop: dimmed but still tappable (navigator still opens) */
-.stop.done { opacity: .5; }
+.stop.done { opacity: .55; }
 .stop.done .stop-addr { text-decoration: line-through; font-weight: 500; }
 .stop.done .stop-n { background: var(--muted); }
 .done-sep { margin-top: 14px; font-weight: 600; }
