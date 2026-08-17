@@ -42,7 +42,11 @@ function splitHouse(line) {
 // Canonicalize the street name into its matchKey form.
 export function normalizeStreetName(streetPart) {
   let s = transliterate(streetPart.toLowerCase().trim());
-  s = s.replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Drop punctuation / OCR artefacts (bullets •, stray leading dots, hyphens,
+  // quotes). After transliteration the string is ASCII, so keep only letters,
+  // digits and spaces — this makes "•Goethestraße" and "Goethestraße" collapse to
+  // the SAME key, so a stray dot no longer splits one address into two points.
+  s = s.replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
   // Unify the "straße" suffix into "strasse", covering both forms:
   //   glued  "goethestr"  -> "goethestrasse"
   //   spaced "haupt str"  -> "haupt strasse"
@@ -132,6 +136,7 @@ export function parseAddress(raw) {
   }
   streetSegment = streetSegment
     .replace(/\n/g, ' ')
+    .replace(/^[^0-9A-Za-zÄÖÜäöüß]+/, '') // drop leading •, dots, dashes (OCR noise)
     .replace(/[,;]+\s*$/, '')
     .replace(/\s+/g, ' ')
     .trim();
