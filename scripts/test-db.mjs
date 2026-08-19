@@ -7,7 +7,7 @@ import 'fake-indexeddb/auto';
 globalThis.navigator = { onLine: false }; // force offline: no Nominatim calls in tests
 
 const { loadAddressIndex, getPoints, clearPoints, putPoint } = await import('../src/core/db.js');
-const { geocodeRaw, canonicalize, recordCanonicalId } = await import('../src/core/geocode.js');
+const { geocodeRaw, canonicalize, recordCanonicalId, setGeoBounds, getGeoBounds } = await import('../src/core/geocode.js');
 const { addItemAtAddress, makeItem, migratePointsV2 } = await import('../src/core/matching.js');
 
 let pass = 0, fail = 0;
@@ -93,6 +93,16 @@ await loadAddressIndex(INDEX);
   const pts = await getPoints();
   ok('interrupted-merge re-run: ONE point', pts.length === 1, `points=${pts.length}`);
   ok('interrupted-merge re-run: item NOT duplicated', pts[0]?.items.length === 1, `items=${pts[0]?.items.length}`);
+}
+
+// --- 6) search-area bounds guard (only valid centre+radius sets a limit) ---------
+{
+  setGeoBounds({ lat: 53.9, lng: 13.04, radiusKm: 40 });
+  ok('valid centre sets bounds', !!getGeoBounds() && getGeoBounds().radiusKm === 40);
+  setGeoBounds({ lat: 53.9, lng: 13.04, radiusKm: 0 });
+  ok('zero radius clears bounds', getGeoBounds() === null);
+  setGeoBounds(null);
+  ok('null clears bounds', getGeoBounds() === null);
 }
 
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);

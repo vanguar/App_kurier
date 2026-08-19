@@ -91,17 +91,54 @@ export async function assessAddress(parsed) {
 let _lastNominatim = 0;
 const _geoCache = new Map();
 
-async function nominatim(paramsObj) {
+// Search-area limit. When set, online geocoding is HARD-restricted to a box around a
+// centre (the courier's district), so a street name that also exists 300 km away can
+// never be returned. Set from Settings via setGeoBounds().
+let _geoBounds = null; // { lat, lng, radiusKm }
+
+export function setGeoBounds(b) {
+  _geoBounds = (b && typeof b.lat === 'number' && typeof b.lng === 'number' && b.radiusKm > 0)
+    ? { lat: b.lat, lng: b.lng, radiusKm: b.radiusKm }
+    : null;
+  _geoCache.clear(); // a changed area can change results, so drop cached coords
+}
+
+export function getGeoBounds() { return _geoBounds; }
+
+// Nominatim viewbox + bounded=1 for the current area (empty object when no limit).
+function boundsParams() {
+  if (!_geoBounds) return {};
+  const { lat, lng, radiusKm } = _geoBounds;
+  const dLat = radiusKm / 111;
+  const dLng = radiusKm / (111 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+  const left = lng - dLng, right = lng + dLng, top = lat + dLat, bottom = lat - dLat;
+  return { viewbox: `${left},${top},${right},${bottom}`, bounded: '1' };
+}
+
+async function nominatim(paramsObj, { bounded = true } = {}) {
   const wait = 1100 - (Date.now() - _lastNominatim);
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   _lastNominatim = Date.now();
-  const params = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'de', ...paramsObj });
+  const limits = bounded ? boundsParams() : {};
+  const params = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'de', ...limits, ...paramsObj });
   const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
     headers: { Accept: 'application/json' },
   });
   const arr = await res.json();
   const hit = Array.isArray(arr) && arr[0];
   return hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : null;
+}
+
+// Resolve the search-area CENTRE (a typed town/address). Deliberately UNbounded — the
+// centre defines the box, so it can't be constrained by itself.
+export async function geocodeCenter(raw) {
+  const parsed = parseAddress(raw || '');
+  const q = [
+    parsed.street ? `${parsed.street} ${parsed.houseNumber || ''}${parsed.houseLetter || ''}`.trim() : '',
+    parsed.postcode, parsed.city,
+  ].filter(Boolean).join(' ').trim() || (raw || '').trim();
+  if (!q) return null;
+  try { return await nominatim({ q }, { bounded: false }); } catch (e) { return null; }
 }
 
 export async function onlineGeocode(parsed) {

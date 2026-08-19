@@ -152,6 +152,11 @@ body {
 }
 .hidden { display: none; }
 
+.slider {
+  width: 100%; margin: 8px 0 4px; height: 26px; cursor: pointer;
+  accent-color: var(--brand); background: transparent;
+}
+
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   gap: 7px; padding: 12px 16px; border: 1px solid var(--line);

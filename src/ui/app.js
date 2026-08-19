@@ -5,7 +5,7 @@ import {
   loadAddressIndex, indexCount, resetSettings,
 } from '../core/db.js';
 import { parseAddress } from '../core/normalizer.js';
-import { geocodeRaw, assessAddress, onlineGeocode } from '../core/geocode.js';
+import { geocodeRaw, assessAddress, onlineGeocode, geocodeCenter, setGeoBounds } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2 } from '../core/matching.js';
 import { computeRoute, roadTrip, roadRoute } from '../core/route.js';
 import { recognize, cloudRecognize, splitAddresses, splitDeviceScreen, pickReceiverBlock, warmUp } from '../ocr/ocr.js';
@@ -68,6 +68,7 @@ export async function start() {
     if (settings.theme === 'auto') applyTheme('auto');
   });
   window.addEventListener('hashchange', render);
+  applyGeoBounds(); // restrict online geocoding to the saved search area
   // v2/v3 identity migration: backfill canonicalId + merge legacy duplicate points.
   try { await migratePointsV2(); } catch (e) { console.warn('point migration skipped:', e); }
   // The v3 DB upgrade drops the old address index (its key layout changed). If the user
@@ -153,6 +154,16 @@ function onbBase(wrap) {
     class: 'link center', text: t('onb_back'),
     onclick: () => renderOnboarding(0),
   }));
+}
+
+// Apply the search-area limit to online geocoding from the saved settings. The centre is
+// the user-typed town (settings.geoCenter) or, if none, the depot (base). No coords -> no
+// limit (so we never accidentally block all geocoding).
+function applyGeoBounds() {
+  if (settings.geoLimit === false) { setGeoBounds(null); return; }
+  const c = settings.geoCenter?.coords || settings.base?.coords;
+  const r = Number(settings.geoRadiusKm) || 60;
+  setGeoBounds(c && typeof c.lat === 'number' ? { lat: c.lat, lng: c.lng, radiusKm: r } : null);
 }
 
 // Resolve coordinates for the Base address. Try the local district index; if not
@@ -317,6 +328,62 @@ async function renderSettings(main) {
         onclick: async () => { settings = await saveSettings({ onlineGeocode: false }); render(); },
       }, t('geocode_off')),
     ]),
+  ]));
+
+  // Search-area limit: only look for addresses within N km of a chosen town, so a
+  // street that also exists far away (e.g. across Germany) is never picked by mistake.
+  const geoLimitOn = settings.geoLimit !== false;
+  const centerRaw = settings.geoCenter?.raw || settings.base?.address?.raw || '';
+  const radiusKm = Number(settings.geoRadiusKm) || 60;
+  const centerInput = el('input', {
+    class: 'input', type: 'text', value: centerRaw,
+    placeholder: t('settings_geoarea_placeholder'),
+  });
+  const radiusLabel = el('p', { class: 'hint', text: `${t('settings_georadius')}: ${radiusKm} ${t('km')}` });
+  const radiusSlider = el('input', {
+    class: 'slider', type: 'range', min: '5', max: '150', step: '5', value: String(radiusKm),
+  });
+  radiusSlider.addEventListener('input', () => {
+    radiusLabel.textContent = `${t('settings_georadius')}: ${radiusSlider.value} ${t('km')}`;
+  });
+  const saveArea = async () => {
+    const raw = centerInput.value.trim();
+    let coords = settings.geoCenter?.coords || null;
+    // Re-resolve the centre only when the town text changed (saves a network call).
+    if (raw && raw !== (settings.geoCenter?.raw || '')) {
+      coords = await geocodeCenter(raw);
+      if (!coords) toast(t('settings_geoarea_notfound'));
+    }
+    settings = await saveSettings({
+      geoLimit: geoLimitOn,
+      geoRadiusKm: Number(radiusSlider.value),
+      geoCenter: raw ? { raw, coords } : null,
+    });
+    applyGeoBounds();
+    toast(t('settings_saved'));
+    render();
+  };
+  main.appendChild(el('div', { class: 'card' }, [
+    el('label', { class: 'field-label', text: t('settings_geoarea') }),
+    el('p', { class: 'hint', text: t('settings_geoarea_hint') }),
+    el('div', { class: 'langgrid' }, [
+      el('button', {
+        class: 'chip' + (geoLimitOn ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ geoLimit: true }); applyGeoBounds(); render(); },
+      }, t('geoarea_on')),
+      el('button', {
+        class: 'chip' + (!geoLimitOn ? ' on' : ''),
+        onclick: async () => { settings = await saveSettings({ geoLimit: false }); applyGeoBounds(); render(); },
+      }, t('geoarea_off')),
+    ]),
+    geoLimitOn ? el('label', { class: 'field-label', text: t('settings_geoarea_center') }) : null,
+    geoLimitOn ? centerInput : null,
+    geoLimitOn ? radiusLabel : null,
+    geoLimitOn ? radiusSlider : null,
+    geoLimitOn ? el('button', { class: 'btn primary', text: t('settings_save'), onclick: saveArea }) : null,
+    geoLimitOn && !(settings.geoCenter?.coords || settings.base?.coords)
+      ? el('p', { class: 'warn', text: t('settings_geoarea_nocenter') })
+      : null,
   ]));
 
   // Route optimization metric
