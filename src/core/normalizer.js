@@ -144,13 +144,17 @@ export function parseAddress(raw) {
   const { streetPart, houseNumber, houseLetter } = splitHouse(streetSegment);
   const normStreet = normalizeStreetName(streetPart);
 
-  // matchKey decides "same point" AND is the online-geocode cache key. It MUST
-  // include the postcode when present, because the same street+house exists in many
-  // towns — without it, two different cities would collapse into one point (a real
-  // parcel dropped as a "duplicate") and share a cached coordinate. Postcode is more
-  // OCR-stable than the city name, so we key on it.
-  const matchKey = normStreet
-    ? `${normStreet}|${houseNumber}${houseLetter}${postcode ? `|${postcode}` : ''}`
+  // Three keys, three jobs (previously conflated into one `matchKey`):
+  //   lookupKey       — postcode-FREE `street|house`, used to FIND the address in the
+  //                     district index. A courier-device screen has no postcode, so the
+  //                     search key must not depend on one.
+  //   matchKey        — postcode-AWARE `street|house|plz`, the geocode cache key and the
+  //                     legacy identity. Postcode stays here because the same street+house
+  //                     exists in many towns (commit 5d5e7f1). Prefer canonicalId (from the
+  //                     index) for merging; matchKey is the fallback identity when unresolved.
+  const lookupKey = normStreet ? `${normStreet}|${houseNumber}${houseLetter}` : '';
+  const matchKey = lookupKey
+    ? `${lookupKey}${postcode ? `|${postcode}` : ''}`
     : '';
 
   // Pretty display form: the cleaned "street + house" segment.
@@ -164,6 +168,7 @@ export function parseAddress(raw) {
     houseLetter,
     postcode,
     city,
+    lookupKey,
     matchKey,
   };
 }

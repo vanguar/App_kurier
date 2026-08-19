@@ -6,9 +6,9 @@ import {
 } from '../core/db.js';
 import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress, onlineGeocode } from '../core/geocode.js';
-import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts } from '../core/matching.js';
+import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2 } from '../core/matching.js';
 import { computeRoute, roadTrip, roadRoute } from '../core/route.js';
-import { recognize, cloudRecognize, splitAddresses, warmUp } from '../ocr/ocr.js';
+import { recognize, cloudRecognize, splitAddresses, splitDeviceScreen, pickReceiverBlock, warmUp } from '../ocr/ocr.js';
 
 let settings = null;
 const app = document.getElementById('app');
@@ -68,6 +68,16 @@ export async function start() {
     if (settings.theme === 'auto') applyTheme('auto');
   });
   window.addEventListener('hashchange', render);
+  // v2/v3 identity migration: backfill canonicalId + merge legacy duplicate points.
+  try { await migratePointsV2(); } catch (e) { console.warn('point migration skipped:', e); }
+  // The v3 DB upgrade drops the old address index (its key layout changed). If the user
+  // already had points but the index is now empty, ask them to reload their district file.
+  if (settings.onboarded) {
+    try {
+      const [pts, idx] = await Promise.all([getPoints(), indexCount()]);
+      if (pts.length > 0 && idx === 0) toast(t('index_reload_hint'));
+    } catch (e) { /* ignore */ }
+  }
   if (!settings.onboarded) {
     renderOnboarding(0);
     return;
@@ -168,6 +178,18 @@ const TYPE_LABELS = () => ({
   letter: t('type_letter'),
 });
 const TYPE_EMOJI = { parcel: '📦', magazine: '📖', letter: '✉️' };
+
+// Scan MODES for the import selector. These are extraction modes, not item types:
+// `device` (courier-device screen) still produces PARCEL items, just parsed differently.
+const SCAN_LABELS = () => ({
+  parcel: t('type_parcel'),
+  device: t('scan_device'),
+  magazine: t('type_magazine'),
+  letter: t('type_letter'),
+});
+const SCAN_EMOJI = { parcel: '📦', device: '📱', magazine: '📖', letter: '✉️' };
+// The delivered-item type a scan mode yields (device screen = a list of parcels).
+const scanItemType = (mode) => (mode === 'device' ? 'parcel' : mode);
 
 // ---------- shell ----------
 function render() {
@@ -404,6 +426,9 @@ async function renderSettings(main) {
       const data = JSON.parse(text);
       const entries = Array.isArray(data) ? data : data.entries || [];
       const n = await loadAddressIndex(entries);
+      // Now that the index exists, re-run identity migration so village points (no PLZ)
+      // resolve to their canonical id and any legacy duplicates finally merge.
+      await migratePointsV2().catch((e) => console.warn('point migration skipped:', e));
       toast(t('settings_index_loaded', { n }));
       render();
     } catch (e) {
@@ -461,21 +486,32 @@ async function renderSettings(main) {
 // ---------- Import / Scan ----------
 let importState = { type: 'parcel', rows: [] };
 
+// Re-attach the known postcode/city to an edited street line, so editing the house
+// number (the review field shows only street+house) does not throw away that context.
+function withAddrContext(streetValue, parsed) {
+  const tail = [parsed?.postcode, parsed?.city].filter(Boolean).join(' ').trim();
+  return tail ? `${streetValue}\n${tail}` : streetValue;
+}
+
 // Add a typed/dictated address into the review list (same flow as OCR results).
 async function addManualRow(raw) {
   const value = (raw || '').trim();
   if (!value) return;
   const g = await geocodeRaw(value, { online: settings.onlineGeocode !== false });
-  const existing = new Set(importState.rows.map((r) => r.parsed.matchKey).filter(Boolean));
-  if (g.parsed.matchKey && existing.has(g.parsed.matchKey)) { toast(t('import_nothing')); return; }
+  const gKey = g.canonicalId || g.parsed.matchKey || '';
+  const existing = new Set(importState.rows.map((r) => r.canonicalId || r.parsed.matchKey).filter(Boolean));
+  if (gKey && existing.has(gKey)) { toast(t('import_nothing')); return; }
   importState.rows.push({
     raw: value,
     editStreet: g.parsed.display,
     parsed: g.parsed,
+    canonicalId: g.canonicalId,
+    canonicalResolved: g.canonicalResolved,
+    candidates: g.candidates,
     confidence: g.confidence,
     coords: g.coords,
     suggestion: g.suggestion,
-    selected: true,
+    selected: !(g.candidates && g.candidates.length),
   });
   render();
 }
@@ -520,18 +556,20 @@ async function renderImport(main) {
   const typeSel = el('div', { class: 'card' }, [
     el('label', { class: 'field-label', text: t('import_type_label') }),
     el('div', { class: 'langgrid' },
-      Object.entries(TYPE_LABELS()).map(([k, label]) =>
+      Object.entries(SCAN_LABELS()).map(([k, label]) =>
         el('button', {
           class: 'chip' + (importState.type === k ? ' on' : ''),
           onclick: () => { importState.type = k; render(); },
-        }, `${TYPE_EMOJI[k]} ${label}`),
+        }, `${SCAN_EMOJI[k]} ${label}`),
       ),
     ),
   ]);
   main.appendChild(typeSel);
 
-  const isList = importState.type === 'parcel';
-  const instruction = el('p', { class: 'hint', text: isList ? t('import_hint_parcel') : t('import_hint_mail') });
+  const isDevice = importState.type === 'device';
+  const isList = importState.type === 'parcel' || isDevice; // both are multi-address lists
+  const hintKey = isDevice ? 'import_hint_device' : (isList ? 'import_hint_parcel' : 'import_hint_mail');
+  const instruction = el('p', { class: 'hint', text: t(hintKey) });
   const progress = el('p', { class: 'hint', id: 'ocr-status', text: '' }); // OCR status only
 
   // Shared handler for BOTH the camera and the file/screenshot pickers.
@@ -560,12 +598,17 @@ async function renderImport(main) {
     // split them and keep the TOP real address block — i.e. the topmost block that
     // actually carries a postcode (so a caption/junk block above it is skipped).
     let blocks;
-    if (isList) {
+    if (isDevice) {
+      // Courier-device screen: card layout, no postcodes, right-hand route codes.
+      blocks = splitDeviceScreen(text, lines);
+    } else if (isList) {
       blocks = splitAddresses(text, lines);
     } else {
+      // MAGAZINE/LETTER = ONE address. If the shot caught the sender too, pick the
+      // RECIPIENT block by scoring (sender markers penalised), not just "first with PLZ".
       const mail = splitAddresses(text, lines);
-      const top = mail.find((b) => /\b\d{5}\b/.test(b)) || mail[0];
-      blocks = top ? [top] : (text.trim() ? [text.trim()] : []);
+      const receiver = pickReceiverBlock(mail);
+      blocks = receiver ? [receiver] : (text.trim() ? [text.trim()] : []);
     }
     if (!blocks.length) {
       progress.textContent = t('import_no_text');
@@ -573,20 +616,27 @@ async function renderImport(main) {
       return;
     }
     // Accumulate across photos (a parcel list may span 2-3 photos), de-duplicating
-    // by matchKey so overlapping shots don't create doubles.
-    const existingKeys = new Set(importState.rows.map((r) => r.parsed.matchKey).filter(Boolean));
+    // by identity (canonicalId, else matchKey) so overlapping shots don't create doubles.
+    const rowKey = (r) => r.canonicalId || r.parsed.matchKey || '';
+    const existingKeys = new Set(importState.rows.map(rowKey).filter(Boolean));
     for (const b of blocks) {
       const g = await geocodeRaw(b, { online: settings.onlineGeocode !== false });
-      if (g.parsed.matchKey && existingKeys.has(g.parsed.matchKey)) continue;
-      if (g.parsed.matchKey) existingKeys.add(g.parsed.matchKey);
+      const key = g.canonicalId || g.parsed.matchKey || '';
+      if (key && existingKeys.has(key)) continue;
+      if (key) existingKeys.add(key);
       importState.rows.push({
         raw: b,
         editStreet: g.parsed.display,
         parsed: g.parsed,
+        canonicalId: g.canonicalId,
+        canonicalResolved: g.canonicalResolved,
+        candidates: g.candidates,
         confidence: g.confidence,
         coords: g.coords,
         suggestion: g.suggestion,
-        selected: g.confidence !== 'red',
+        // An ambiguous address (several index matches) must NOT be auto-selected — the
+        // courier has to pick which town first (see the chooser in renderReview).
+        selected: g.confidence !== 'red' && !(g.candidates && g.candidates.length),
       });
     }
     render();
@@ -615,7 +665,25 @@ async function renderImport(main) {
         })
       : null,
   ]);
-  main.appendChild(photoCard);
+
+  // One-time informed consent before any photo can be sent to the cloud OCR. Until the
+  // user chooses, the photo buttons are hidden — nothing leaves the device unasked.
+  if (settings.ocrConsent == null) {
+    const choose = async (engine) => {
+      settings = await saveSettings({ ocrConsent: true, ocrEngine: engine });
+      render();
+    };
+    main.appendChild(el('div', { class: 'card' }, [
+      el('h3', { class: 'field-label', text: t('ocr_consent_title') }),
+      el('p', { class: 'hint', text: t('ocr_consent_body') }),
+      el('div', { class: 'btnrow' }, [
+        el('button', { class: 'btn primary', text: t('ocr_consent_cloud'), onclick: () => choose('cloud') }),
+        el('button', { class: 'btn', text: t('ocr_consent_device'), onclick: () => choose('device') }),
+      ]),
+    ]));
+  } else {
+    main.appendChild(photoCard);
+  }
 
   // Manual / voice entry
   const manualInput = el('input', {
@@ -667,11 +735,17 @@ function renderReview() {
     });
     streetInput.addEventListener('change', async () => {
       row.editStreet = streetInput.value;
-      const g = await geocodeRaw(streetInput.value, { online: settings.onlineGeocode !== false });
+      // Keep the known PLZ/city as CONTEXT so an edit to the house number does not
+      // strip them (canonicalization via the index still overrides them authoritatively).
+      const g = await geocodeRaw(withAddrContext(streetInput.value, row.parsed), { online: settings.onlineGeocode !== false });
       row.parsed = g.parsed;
+      row.canonicalId = g.canonicalId;
+      row.canonicalResolved = g.canonicalResolved;
+      row.candidates = g.candidates;
       row.confidence = g.confidence;
       row.coords = g.coords;
       row.suggestion = g.suggestion;
+      if (g.candidates && g.candidates.length) row.selected = false;
       render();
     });
 
@@ -691,12 +765,40 @@ function renderReview() {
                 const house = `${row.parsed.houseNumber}${row.parsed.houseLetter}`;
                 streetInput.value = `${row.suggestion} ${house}`.trim();
                 row.editStreet = streetInput.value;
-                const g = await geocodeRaw(streetInput.value);
-                row.parsed = g.parsed; row.confidence = g.confidence;
+                const g = await geocodeRaw(withAddrContext(streetInput.value, row.parsed));
+                row.parsed = g.parsed; row.canonicalId = g.canonicalId; row.candidates = g.candidates;
+                row.canonicalResolved = g.canonicalResolved;
+                row.confidence = g.confidence;
                 row.coords = g.coords; row.suggestion = g.suggestion;
                 render();
               },
             })
+          : null,
+        // Ambiguous: same street+house in several towns. Force an explicit choice —
+        // never silently guess (a wrong "green" is worse than a yellow prompt).
+        row.candidates && row.candidates.length
+          ? el('div', { class: 'cand-choose' }, [
+              el('p', { class: 'warn', text: t('import_ambiguous') }),
+              ...row.candidates.map((c) => el('button', {
+                class: 'btn sm',
+                text: `${c.postcode || '—'} ${c.city || c.street}`.trim(),
+                onclick: () => {
+                  const lk = row.parsed.lookupKey;
+                  // Identity ties to the CHOSEN OSM record (index:<id>), so two towns that
+                  // share street+house(+postcode) never collapse to one canonicalId.
+                  const cid = (c.id != null) ? `index:${c.id}` : (c.postcode ? `${lk}|${c.postcode}` : lk);
+                  const cache = c.postcode ? `${lk}|${c.postcode}` : lk;
+                  row.parsed = { ...row.parsed, postcode: c.postcode || '', city: c.city || '', matchKey: cache };
+                  row.canonicalId = cid;
+                  row.canonicalResolved = true;
+                  row.coords = (typeof c.lat === 'number') ? { lat: c.lat, lng: c.lng } : row.coords;
+                  row.confidence = 'green';
+                  row.candidates = [];
+                  row.selected = true;
+                  render();
+                },
+              })),
+            ])
           : null,
       ]),
     ]);
@@ -710,11 +812,14 @@ function renderReview() {
     addBtn.disabled = n === 0;
   };
   addBtn.addEventListener('click', async () => {
-    const chosen = importState.rows.filter((r) => r.selected && r.parsed.matchKey);
+    const chosen = importState.rows.filter(
+      (r) => r.selected && (r.canonicalId || r.parsed.matchKey) && !(r.candidates && r.candidates.length),
+    );
     if (!chosen.length) { toast(t('import_nothing')); return; }
+    const itemType = scanItemType(importState.type); // device screen -> parcel items
     for (const r of chosen) {
-      const item = makeItem({ type: importState.type, source: 'ocr', rawText: r.raw });
-      await addItemAtAddress(r.parsed, item, { coords: r.coords, verified: true });
+      const item = makeItem({ type: itemType, source: 'ocr', rawText: r.raw });
+      await addItemAtAddress(r.parsed, item, { coords: r.coords, verified: true, canonicalId: r.canonicalId, canonicalResolved: r.canonicalResolved });
     }
     toast(t('import_added', { n: chosen.length }));
     importState.rows = [];

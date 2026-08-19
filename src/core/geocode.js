@@ -1,6 +1,45 @@
 // Local geocoding + OCR confidence, all offline against the district address index.
-import { getIndexEntry, getIndexStreets, indexCount } from './db.js';
+import { getIndexEntry, getIndexByLookup, getIndexStreets, indexCount } from './db.js';
 import { normalizeStreetName, levenshtein, parseAddress } from './normalizer.js';
+
+// Canonicalize an OCR candidate against the district index. This — not "restore the
+// PLZ" — is the heart of cross-format identity: a device-screen parcel (no postcode,
+// "gehmkow|6") and a letter with a postcode ("gehmkow|6|17111") both resolve to the
+// SAME index record and therefore the SAME canonicalId, so their deliveries merge.
+//   1 index hit  -> canonicalId from that record's authoritative postcode (+ coords/city)
+//   >1 hits      -> same street+house in several towns; caller must let the user choose
+//   0 hits       -> unresolved; canonicalId falls back to matchKey|lookupKey (flagged)
+//
+// The canonicalId of a RESOLVED address is `index:<record.id>` — tied to the exact OSM
+// object, NOT to `lookupKey|postcode`. This matters because two different towns can share
+// the same street, house AND postcode; `lookupKey|postcode` would collapse them, the OSM
+// id never does. Cross-format merge still works: a device parcel (no PLZ) and a letter
+// (with PLZ) both resolve to the SAME record, hence the same `index:<id>`.
+export function recordCanonicalId(record) {
+  return record && record.id != null ? `index:${record.id}` : '';
+}
+
+export async function canonicalize(parsed) {
+  if (!parsed || !parsed.lookupKey) {
+    return { canonicalId: parsed?.matchKey || '', record: null, candidates: [] };
+  }
+  const matches = await getIndexByLookup(parsed.lookupKey);
+  if (matches.length === 1) {
+    return { canonicalId: recordCanonicalId(matches[0]), record: matches[0], candidates: [] };
+  }
+  if (matches.length > 1) {
+    // Narrow by the OCR postcode when we have one. Only auto-resolve if it pins EXACTLY
+    // one record — if several share that postcode too, it's still ambiguous (user picks).
+    let pool = matches;
+    if (parsed.postcode) {
+      const byPc = matches.filter((m) => m.postcode === parsed.postcode);
+      if (byPc.length === 1) return { canonicalId: recordCanonicalId(byPc[0]), record: byPc[0], candidates: [] };
+      if (byPc.length > 1) pool = byPc; // narrow the choices we offer
+    }
+    return { canonicalId: '', record: null, candidates: pool }; // ambiguous -> user picks
+  }
+  return { canonicalId: parsed.matchKey || parsed.lookupKey, record: null, candidates: [] };
+}
 
 // Confidence levels for the review screen:
 //   green  — street + house exist in the index  -> coords known
@@ -102,6 +141,46 @@ export async function onlineGeocode(parsed) {
 //   red    — could not identify/locate an address -> needs a fix
 export async function geocodeRaw(raw, { online = true } = {}) {
   const parsed = parseAddress(raw);
+
+  // 1) Canonicalize against the district index first — the authoritative source.
+  const canon = await canonicalize(parsed);
+  if (canon.record) {
+    // The index is AUTHORITATIVE for this street+house: overwrite postcode/city with its
+    // values (not just fill blanks). This both completes a device-screen address (no PLZ)
+    // AND fixes a stale PLZ left over from editing (old "Dorfstraße 48, PLZ A" -> typed
+    // "Seestraße 25" must take Seestraße's PLZ B, never keep A).
+    if (canon.record.postcode) parsed.postcode = canon.record.postcode;
+    if (canon.record.city) parsed.city = canon.record.city;
+    // Keep matchKey (the geocode cache key) consistent with the authoritative postcode.
+    if (parsed.lookupKey) {
+      parsed.matchKey = parsed.postcode ? `${parsed.lookupKey}|${parsed.postcode}` : parsed.lookupKey;
+    }
+    return {
+      parsed,
+      canonicalId: canon.canonicalId,
+      canonicalResolved: true, // confirmed by the district index
+      coords: { lat: canon.record.lat, lng: canon.record.lng },
+      confidence: 'green',
+      suggestion: null,
+      candidates: [],
+      reason: 'index',
+    };
+  }
+  if (canon.candidates.length) {
+    // Same street+house in several towns — routable but ambiguous; user must choose.
+    return {
+      parsed,
+      canonicalId: '',
+      canonicalResolved: false,
+      coords: null,
+      confidence: 'yellow',
+      suggestion: null,
+      candidates: canon.candidates,
+      reason: 'ambiguous',
+    };
+  }
+
+  // 2) Not in the local index — fuzzy assess + optional online geocode.
   const assessment = await assessAddress(parsed);
   let coords = assessment.coords;
 
@@ -112,10 +191,23 @@ export async function geocodeRaw(raw, { online = true } = {}) {
   }
 
   let confidence;
-  if (coords) confidence = 'green';
-  else if (!parsed.matchKey) confidence = 'red'; // no recognizable street+house
+  if (coords) {
+    // A first Nominatim hit for a bare village (no postcode/city to anchor on) is a
+    // guess — keep it routable but flag it YELLOW instead of a false-confident green.
+    const anchored = assessment.coords || parsed.postcode || parsed.city;
+    confidence = anchored ? 'green' : 'yellow';
+  } else if (!parsed.matchKey) confidence = 'red'; // no recognizable street+house
   else if (triedOnline) confidence = 'red'; // looked it up, nothing found -> fix it
   else confidence = 'yellow'; // parsed but not verified (offline)
 
-  return { parsed, coords: coords || null, confidence, suggestion: assessment.suggestion, reason: assessment.reason };
+  return {
+    parsed,
+    canonicalId: canon.canonicalId, // matchKey||lookupKey fallback identity
+    canonicalResolved: false, // not index-confirmed -> migration may re-resolve later
+    coords: coords || null,
+    confidence,
+    suggestion: assessment.suggestion,
+    candidates: [],
+    reason: assessment.reason,
+  };
 }

@@ -2,12 +2,17 @@
 //
 // One-time data step (free, offline afterwards). Steps:
 //
-// 1) Go to https://overpass-turbo.eu, zoom to YOUR delivery district, run this query:
+// 1) Go to https://overpass-turbo.eu, zoom to YOUR delivery district, run this query.
+//    IMPORTANT: rural villages (Törpin, Gehmkow, Hof Peeneland …) often have NO named
+//    street — their houses are tagged with `addr:place` (the hamlet name) instead of
+//    `addr:street`. The courier-device screen shows exactly these, so we must pull BOTH:
 //
-//      [out:json][timeout:60];
+//      [out:json][timeout:90];
 //      (
 //        node["addr:housenumber"]["addr:street"]({{bbox}});
 //        way["addr:housenumber"]["addr:street"]({{bbox}});
+//        node["addr:housenumber"]["addr:place"]({{bbox}});
+//        way["addr:housenumber"]["addr:place"]({{bbox}});
 //      );
 //      out center;
 //
@@ -35,7 +40,9 @@ const elements = data.elements || [];
 const byKey = new Map();
 for (const e of elements) {
   const tags = e.tags || {};
-  const street = tags['addr:street'];
+  // Prefer a named street; fall back to the hamlet/place name for street-less villages.
+  const street = tags['addr:street'] || tags['addr:place'];
+  const addressKind = tags['addr:street'] ? 'street' : (tags['addr:place'] ? 'place' : '');
   const house = tags['addr:housenumber'];
   if (!street || !house) continue;
 
@@ -43,21 +50,33 @@ for (const e of elements) {
   const lng = e.lon ?? e.center?.lon;
   if (typeof lat !== 'number' || typeof lng !== 'number') continue;
 
-  // Feed the postcode/city too so the index key matches the app's postcode-aware
-  // matchKey (same street+house in different towns must stay distinct).
+  // Feed the postcode/city too so the full matchKey stays postcode-aware (same
+  // street+house in different towns must stay distinct). But a MISSING postcode must
+  // NOT drop the record — many rural OSM elements carry no addr:postcode (Nominatim
+  // derives it from context). We keep them and rely on lookupKey (street|house) instead.
   const pc = tags['addr:postcode'] || '';
   const town = tags['addr:city'] || '';
   const parsed = parseAddress(`${street} ${house}\n${pc} ${town}`.trim());
-  if (!parsed.matchKey) continue;
+  if (!parsed.lookupKey) continue;
 
-  // First occurrence wins (avoids duplicate node/way for the same address).
-  if (byKey.has(parsed.matchKey)) continue;
-  byKey.set(parsed.matchKey, {
-    matchKey: parsed.matchKey,
+  // Stable unique id from the OSM object (type + id). Dedupe on THIS, not on matchKey:
+  // two distinct real places that share a postcode-less lookupKey must BOTH survive so
+  // the app can offer a choice (previously one silently overwrote the other).
+  const osmType = e.type || '';
+  const osmId = e.id ?? '';
+  const id = (osmType && osmId !== '') ? `${osmType}/${osmId}` : `${parsed.matchKey || parsed.lookupKey}@${lat},${lng}`;
+  if (byKey.has(id)) continue; // same OSM object twice (node + way) -> keep first
+  byKey.set(id, {
+    id,
+    osmType,
+    osmId,
+    matchKey: parsed.matchKey,     // full (may equal lookupKey when no postcode)
+    lookupKey: parsed.lookupKey,   // postcode-free search key
+    addressKind,                   // 'street' | 'place'
     street,
     houseNumber: parsed.houseNumber + parsed.houseLetter,
-    postcode: tags['addr:postcode'] || '',
-    city: tags['addr:city'] || '',
+    postcode: pc,
+    city: town,
     lat,
     lng,
   });

@@ -2,23 +2,41 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'kurier';
-const DB_VERSION = 1;
+const DB_VERSION = 3;
 
 let _dbPromise = null;
 
 function db() {
   if (!_dbPromise) {
     _dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(d) {
+      upgrade(d, oldVersion, newVersion, tx) {
         if (!d.objectStoreNames.contains('settings')) {
           d.createObjectStore('settings'); // key-value: settings['app'] = {...}
         }
+        // points: keyed by id, indexed by matchKey (legacy) + canonicalId (v2 merge id).
         if (!d.objectStoreNames.contains('points')) {
           const s = d.createObjectStore('points', { keyPath: 'id' });
           s.createIndex('matchKey', 'matchKey', { unique: false });
+          s.createIndex('canonicalId', 'canonicalId', { unique: false });
+        } else if (oldVersion < 2) {
+          const pts = tx.objectStore('points');
+          if (!pts.indexNames.contains('canonicalId')) {
+            pts.createIndex('canonicalId', 'canonicalId', { unique: false });
+          }
+        }
+        // addressIndex v3: keyed by a UNIQUE id (OSM type/id) so two distinct real places
+        // that share a postcode-less lookupKey (e.g. "dorfstrasse|5" in two hamlets) both
+        // survive instead of one overwriting the other — that ambiguity must reach the app
+        // so the courier can choose. matchKey/lookupKey become (non-unique) indexes.
+        // Pre-v3 stores were keyed by matchKey; drop and recreate (the file must be
+        // regenerated for addr:place support anyway, so nothing useful is lost).
+        if (d.objectStoreNames.contains('addressIndex') && oldVersion < 3) {
+          d.deleteObjectStore('addressIndex');
         }
         if (!d.objectStoreNames.contains('addressIndex')) {
-          d.createObjectStore('addressIndex', { keyPath: 'matchKey' });
+          const ix = d.createObjectStore('addressIndex', { keyPath: 'id' });
+          ix.createIndex('matchKey', 'matchKey', { unique: false });
+          ix.createIndex('lookupKey', 'lookupKey', { unique: false });
         }
       },
     });
@@ -53,6 +71,8 @@ const DEFAULT_SETTINGS = {
   theme: 'auto', // 'auto' | 'light' | 'dark'
   navigator: 'ask', // 'ask' | 'google' | 'waze' | 'geo'  (which map app to open a stop in)
   ocrEngine: 'cloud', // 'device' (Tesseract, offline) | 'cloud' (OCR.space, accurate)
+  ocrConsent: null, // null until the user makes an informed cloud-vs-device choice once
+
   ocrApiKey: '', // OCR.space free key (empty -> uses limited demo key)
   onlineGeocode: true, // look up coordinates online (OpenStreetMap) when local index misses
   parcelPriority: true, // pull parcel stops earlier on near-ties (parcels beat mail)
@@ -98,10 +118,36 @@ export async function findPointByKey(matchKey) {
   return (await d.getFromIndex('points', 'matchKey', matchKey)) || null;
 }
 
+// Find a point by its cross-format identity (canonicalId), falling back to the legacy
+// matchKey so points saved before v2 still merge.
+export async function findPointByCanonical(canonicalId, matchKey) {
+  const d = await db();
+  if (canonicalId) {
+    const byCanon = await d.getFromIndex('points', 'canonicalId', canonicalId);
+    if (byCanon) return byCanon;
+  }
+  if (matchKey) {
+    const byMatch = await d.getFromIndex('points', 'matchKey', matchKey);
+    if (byMatch) return byMatch;
+  }
+  return null;
+}
+
 export async function putPoint(point) {
   const d = await db();
   await d.put('points', point);
   return point;
+}
+
+// Atomically replace a set of points with one merged survivor: save `keep` and delete the
+// duplicate ids in a SINGLE transaction, so an interrupted merge can never leave the
+// survivor saved AND the duplicates alive (which would re-append items on the next run).
+export async function mergePointsTx(keep, deleteIds) {
+  const d = await db();
+  const tx = d.transaction('points', 'readwrite');
+  await tx.store.put(keep);
+  for (const id of deleteIds) if (id !== keep.id) await tx.store.delete(id);
+  await tx.done;
 }
 
 export async function deletePoint(id) {
@@ -118,7 +164,24 @@ export async function clearPoints() {
 export async function getIndexEntry(matchKey) {
   if (!matchKey) return null;
   const d = await db();
-  return (await d.get('addressIndex', matchKey)) || null;
+  return (await d.getFromIndex('addressIndex', 'matchKey', matchKey)) || null;
+}
+
+// Postcode-free lookup: all index records for a `street|house` key, regardless of PLZ.
+// One hit -> canonicalize directly; several -> same street+house in >1 town (user picks).
+export async function getIndexByLookup(lookupKey) {
+  if (!lookupKey) return [];
+  const d = await db();
+  if (!d.objectStoreNames.contains('addressIndex')) return [];
+  const store = d.transaction('addressIndex').store;
+  if (!store.indexNames.contains('lookupKey')) return [];
+  return (await store.index('lookupKey').getAll(lookupKey)) || [];
+}
+
+// Derive the postcode-free lookupKey from a full matchKey ("street|house|plz" -> "street|house").
+function lookupFromMatch(matchKey) {
+  const parts = (matchKey || '').split('|');
+  return parts.length >= 2 ? `${parts[0]}|${parts[1]}` : (matchKey || '');
 }
 
 export async function indexCount() {
@@ -126,11 +189,31 @@ export async function indexCount() {
   return d.count('addressIndex');
 }
 
-// Bulk-load the district address index (array of {matchKey,street,houseNumber,postcode,city,lat,lng}).
+// Bulk-load the district address index. Clears the previous index first (so stale
+// records/coords from an old file don't linger) and backfills id/lookupKey/addressKind
+// for older index files that predate those fields.
 export async function loadAddressIndex(entries) {
   const d = await db();
   const tx = d.transaction('addressIndex', 'readwrite');
-  for (const e of entries) tx.store.put(e);
+  await tx.store.clear(); // replace, don't merge — avoids stale leftovers
+  let i = 0;
+  const seen = new Set();
+  for (const e of entries) {
+    const entry = { ...e };
+    if (!entry.lookupKey) entry.lookupKey = lookupFromMatch(entry.matchKey);
+    if (!entry.addressKind) entry.addressKind = 'street';
+    // Unique primary key: OSM id if present, else a synthetic per-address key. Dedupe
+    // identical ids so a re-run doesn't throw on the keyPath.
+    if (!entry.id) {
+      entry.id = (entry.osmType && entry.osmId)
+        ? `${entry.osmType}/${entry.osmId}`
+        : `${entry.matchKey || entry.lookupKey}@${entry.lat},${entry.lng}`;
+    }
+    if (seen.has(entry.id)) entry.id = `${entry.id}#${i}`;
+    seen.add(entry.id);
+    tx.store.put(entry);
+    i++;
+  }
   await tx.done;
   return entries.length;
 }
