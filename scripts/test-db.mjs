@@ -7,7 +7,7 @@ import 'fake-indexeddb/auto';
 globalThis.navigator = { onLine: false }; // force offline: no Nominatim calls in tests
 
 const { loadAddressIndex, getPoints, clearPoints, putPoint } = await import('../src/core/db.js');
-const { geocodeRaw, canonicalize, recordCanonicalId, setGeoBounds, getGeoBounds } = await import('../src/core/geocode.js');
+const { geocodeRaw, canonicalize, recordCanonicalId, setGeoBounds, getGeoBounds, withinBounds } = await import('../src/core/geocode.js');
 const { addItemAtAddress, makeItem, migratePointsV2 } = await import('../src/core/matching.js');
 
 let pass = 0, fail = 0;
@@ -103,6 +103,13 @@ await loadAddressIndex(INDEX);
   ok('zero radius clears bounds', getGeoBounds() === null);
   setGeoBounds(null);
   ok('null clears bounds', getGeoBounds() === null);
+
+  // withinBounds: used to re-validate stored point coords at route time.
+  ok('no bounds -> everything within', withinBounds({ lat: 53.36, lng: 13.07 }) === true);
+  setGeoBounds({ lat: 53.90, lng: 13.04, radiusKm: 40 }); // ~Demmin, 40 km
+  ok('near Demmin is within', withinBounds({ lat: 53.98, lng: 13.05 }) === true);
+  ok('Neustrelitz (~60 km) is OUTSIDE', withinBounds({ lat: 53.36, lng: 13.07 }) === false);
+  setGeoBounds(null);
 }
 
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);

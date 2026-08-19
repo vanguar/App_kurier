@@ -145,6 +145,7 @@
   "geoarea_off": "Bez ograniczenia",
   "km": "km",
   "route_geocoding": "Ustalam współrzędne… {i}/{n}",
+  "route_revalidating": "Sprawdzam współrzędne względem obszaru… {i}/{n}",
   "settings_routemetric": "Optymalizacja trasy",
   "settings_routemetric_hint": "„Po drogach” to realne odległości drogowe (dokładnie, wymaga internetu). „W linii prostej” działa offline i szybciej.",
   "metric_road": "Po drogach (dokładnie)",

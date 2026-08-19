@@ -146,6 +146,12 @@ export async function onlineGeocode(parsed) {
   const key = parsed.matchKey || parsed.raw || '';
   if (_geoCache.has(key)) return _geoCache.get(key);
 
+  // Apply the search-area limit ONLY to ambiguous lookups (no postcode). A full
+  // "street + PLZ + city" query is already precise, so it must stay UNbounded — otherwise
+  // a legitimately far, fully-addressed parcel (e.g. a PAKETLISTE stop in another town)
+  // would be wrongly rejected. A postcode-less village name ("Seestrasse 25") is the case
+  // that needs bounding, because Nominatim would otherwise grab a same-named street far away.
+  const opts = { bounded: !parsed.postcode };
   let coords = null;
   try {
     // 1) structured query (most precise)
@@ -154,7 +160,7 @@ export async function onlineGeocode(parsed) {
         street: `${parsed.houseNumber}${parsed.houseLetter || ''} ${parsed.street}`.trim(),
         ...(parsed.city ? { city: parsed.city } : {}),
         ...(parsed.postcode ? { postalcode: parsed.postcode } : {}),
-      });
+      }, opts);
     }
     // 2) free-text fallback (catches addresses the structured query misses)
     if (!coords) {
@@ -163,7 +169,7 @@ export async function onlineGeocode(parsed) {
         parsed.postcode,
         parsed.city,
       ].filter(Boolean).join(' ').trim() || (parsed.raw || '');
-      if (q) coords = await nominatim({ q });
+      if (q) coords = await nominatim({ q }, opts);
     }
   } catch (e) {
     coords = null;
@@ -171,6 +177,18 @@ export async function onlineGeocode(parsed) {
   _geoCache.set(key, coords);
   return coords;
 }
+
+// Is a coordinate inside the current search area? True when no limit is set. Used to
+// re-validate ALREADY-STORED point coords (which may predate the limit) at route time.
+export function withinBounds(coords) {
+  if (!_geoBounds || !coords || typeof coords.lat !== 'number') return true;
+  const { lat, lng, radiusKm } = _geoBounds;
+  const dLat = radiusKm / 111;
+  const dLng = radiusKm / (111 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+  return Math.abs(coords.lat - lat) <= dLat && Math.abs(coords.lng - lng) <= dLng;
+}
+
+export function boundsActive() { return !!_geoBounds; }
 
 // Parse + locate in one call, returning a result-driven confidence:
 //   green  — coordinates found (local index or online) -> routable

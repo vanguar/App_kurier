@@ -5,7 +5,7 @@ import {
   loadAddressIndex, indexCount, resetSettings,
 } from '../core/db.js';
 import { parseAddress } from '../core/normalizer.js';
-import { geocodeRaw, assessAddress, onlineGeocode, geocodeCenter, setGeoBounds } from '../core/geocode.js';
+import { geocodeRaw, assessAddress, onlineGeocode, geocodeCenter, setGeoBounds, withinBounds, boundsActive } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2 } from '../core/matching.js';
 import { computeRoute, roadTrip, roadRoute } from '../core/route.js';
 import { recognize, cloudRecognize, splitAddresses, splitDeviceScreen, pickReceiverBlock, warmUp } from '../ocr/ocr.js';
@@ -162,7 +162,7 @@ function onbBase(wrap) {
 function applyGeoBounds() {
   if (settings.geoLimit === false) { setGeoBounds(null); return; }
   const c = settings.geoCenter?.coords || settings.base?.coords;
-  const r = Number(settings.geoRadiusKm) || 60;
+  const r = Number(settings.geoRadiusKm) || 40;
   setGeoBounds(c && typeof c.lat === 'number' ? { lat: c.lat, lng: c.lng, radiusKm: r } : null);
 }
 
@@ -334,7 +334,7 @@ async function renderSettings(main) {
   // street that also exists far away (e.g. across Germany) is never picked by mistake.
   const geoLimitOn = settings.geoLimit !== false;
   const centerRaw = settings.geoCenter?.raw || settings.base?.address?.raw || '';
-  const radiusKm = Number(settings.geoRadiusKm) || 60;
+  const radiusKm = Number(settings.geoRadiusKm) || 40;
   const centerInput = el('input', {
     class: 'input', type: 'text', value: centerRaw,
     placeholder: t('settings_geoarea_placeholder'),
@@ -1025,6 +1025,27 @@ async function renderRoute(main) {
 
   buildBtn.addEventListener('click', async () => {
     const points = await getPoints();
+
+    // Re-validate STORED coords against the search area. An ambiguous (no-postcode) point
+    // whose saved coordinate lands outside the area was geocoded to a wrong same-named town
+    // BEFORE the limit existed (the route uses stored coords, so the old error persisted).
+    // Re-geocode it inside the area, or drop the coordinate so it won't drag the route 100 km.
+    if (boundsActive() && (settings.onlineGeocode !== false) && navigator.onLine) {
+      const stale = points.filter((p) => p.coords && !p.address?.postcode && !withinBounds(p.coords));
+      if (stale.length) {
+        clear(result);
+        const status = el('p', { class: 'hint' });
+        result.appendChild(status);
+        for (let i = 0; i < stale.length; i++) {
+          status.textContent = t('route_revalidating', { i: i + 1, n: stale.length });
+          const p = stale[i];
+          const c = await onlineGeocode({ ...p.address, matchKey: p.matchKey });
+          p.coords = (c && withinBounds(c)) ? c : null;
+          p.geocodeStatus = p.coords ? 'matched' : 'notfound';
+          await putPoint(p);
+        }
+      }
+    }
 
     // Fill in coordinates for any points that don't have them yet (online),
     // so already-added stops also become routable.

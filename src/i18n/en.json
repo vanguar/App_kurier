@@ -145,6 +145,7 @@
   "geoarea_off": "No limit",
   "km": "km",
   "route_geocoding": "Getting coordinates… {i}/{n}",
+  "route_revalidating": "Checking coordinates against the area… {i}/{n}",
   "settings_routemetric": "Route optimization",
   "settings_routemetric_hint": "“By roads” uses real driving distances (accurate, needs internet). “Straight-line” is offline and faster.",
   "metric_road": "By roads (accurate)",

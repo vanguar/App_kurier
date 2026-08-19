@@ -76,7 +76,7 @@ const DEFAULT_SETTINGS = {
   ocrApiKey: '', // OCR.space free key (empty -> uses limited demo key)
   onlineGeocode: true, // look up coordinates online (OpenStreetMap) when local index misses
   geoLimit: true,      // restrict online geocoding to a radius around a centre (below)
-  geoRadiusKm: 60,     // search radius in km (slider in Settings)
+  geoRadiusKm: 40,     // search radius in km (slider in Settings)
   geoCenter: null,     // { raw, coords:{lat,lng} } — defaults to the depot (base) when null
   parcelPriority: true, // pull parcel stops earlier on near-ties (parcels beat mail)
   onboarded: false, // first-run welcome + Base wizard completed?

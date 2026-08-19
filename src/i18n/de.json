@@ -145,6 +145,7 @@
   "geoarea_off": "Ohne Grenze",
   "km": "km",
   "route_geocoding": "Ermittle Koordinaten… {i}/{n}",
+  "route_revalidating": "Prüfe Koordinaten im Suchbereich… {i}/{n}",
   "settings_routemetric": "Routenoptimierung",
   "settings_routemetric_hint": "„Über Straßen“ nutzt echte Fahrstrecken (genau, Internet nötig). „Luftlinie“ ist offline und schneller.",
   "metric_road": "Über Straßen (genau)",
