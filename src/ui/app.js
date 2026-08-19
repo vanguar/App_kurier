@@ -166,6 +166,19 @@ function applyGeoBounds() {
   setGeoBounds(c && typeof c.lat === 'number' ? { lat: c.lat, lng: c.lng, radiusKm: r } : null);
 }
 
+// Fetch the district index bundled with the app (public/district-index.json) and load it
+// into IndexedDB, then re-run identity migration so existing points canonicalize/merge.
+// Shared by the Settings button and the Route-screen prompt. Returns the address count.
+async function loadBundledDistrictIndex() {
+  const res = await fetch(`${import.meta.env.BASE_URL}district-index.json`, { cache: 'force-cache' });
+  if (!res.ok) throw new Error('http ' + res.status);
+  const data = await res.json();
+  const entries = Array.isArray(data) ? data : data.entries || [];
+  const n = await loadAddressIndex(entries);
+  await migratePointsV2().catch((e) => console.warn('point migration skipped:', e));
+  return n;
+}
+
 // Resolve coordinates for the Base address. Try the local district index; if not
 // found, keep the previously known depot coords when the address is unchanged
 // (the depot often sits outside the delivery district the index covers).
@@ -514,12 +527,7 @@ async function renderSettings(main) {
     idxStatus.className = 'hint';
     idxStatus.textContent = t('settings_index_downloading');
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}district-index.json`, { cache: 'force-cache' });
-      if (!res.ok) throw new Error('http ' + res.status);
-      const data = await res.json();
-      const entries = Array.isArray(data) ? data : data.entries || [];
-      const n = await loadAddressIndex(entries);
-      await migratePointsV2().catch((e) => console.warn('point migration skipped:', e));
+      const n = await loadBundledDistrictIndex();
       toast(t('settings_index_loaded', { n }));
       render();
     } catch (e) {
@@ -1040,6 +1048,31 @@ async function renderRoute(main) {
   if (!settings.base?.coords) {
     main.appendChild(el('p', { class: 'warn', text: t('route_need_base') }));
     return;
+  }
+
+  // Proactively offer the district index when it's not loaded yet — village addresses
+  // (no postcode) are only reliable with it, so prompt here instead of hiding it in Settings.
+  if ((await indexCount()) === 0) {
+    const promptStatus = el('p', { class: 'hint', text: t('route_index_prompt') });
+    const loadBtn = el('button', { class: 'btn primary', text: '⬇️ ' + t('settings_index_bundled') });
+    loadBtn.addEventListener('click', async () => {
+      loadBtn.disabled = true;
+      promptStatus.textContent = t('settings_index_downloading');
+      try {
+        const n = await loadBundledDistrictIndex();
+        toast(t('settings_index_loaded', { n }));
+        render();
+      } catch (e) {
+        loadBtn.disabled = false;
+        promptStatus.className = 'warn';
+        promptStatus.textContent = t('settings_index_download_err');
+      }
+    });
+    main.appendChild(el('div', { class: 'card' }, [
+      el('label', { class: 'field-label', text: t('route_index_prompt_title') }),
+      promptStatus,
+      loadBtn,
+    ]));
   }
 
   const buildBtn = el('button', { class: 'btn primary big', text: t('route_build') });

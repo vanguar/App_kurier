@@ -150,6 +150,8 @@
   "km": "km",
   "route_geocoding": "Getting coordinates… {i}/{n}",
   "route_revalidating": "Checking coordinates against the area… {i}/{n}",
+  "route_index_prompt_title": "District index not loaded",
+  "route_index_prompt": "For accurate village addresses, load the district index (once, ~7 MB). Without it, postcode-less addresses may be located imprecisely.",
   "settings_routemetric": "Route optimization",
   "settings_routemetric_hint": "“By roads” uses real driving distances (accurate, needs internet). “Straight-line” is offline and faster.",
   "metric_road": "By roads (accurate)",

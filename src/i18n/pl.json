@@ -150,6 +150,8 @@
   "km": "km",
   "route_geocoding": "Ustalam współrzędne… {i}/{n}",
   "route_revalidating": "Sprawdzam współrzędne względem obszaru… {i}/{n}",
+  "route_index_prompt_title": "Indeks rejonu nie wczytany",
+  "route_index_prompt": "Aby dokładnie ustalać adresy wiejskie, wczytaj indeks rejonu (raz, ~7 MB). Bez niego adresy bez kodu pocztowego mogą być lokalizowane niedokładnie.",
   "settings_routemetric": "Optymalizacja trasy",
   "settings_routemetric_hint": "„Po drogach” to realne odległości drogowe (dokładnie, wymaga internetu). „W linii prostej” działa offline i szybciej.",
   "metric_road": "Po drogach (dokładnie)",

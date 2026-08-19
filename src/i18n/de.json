@@ -150,6 +150,8 @@
   "km": "km",
   "route_geocoding": "Ermittle Koordinaten… {i}/{n}",
   "route_revalidating": "Prüfe Koordinaten im Suchbereich… {i}/{n}",
+  "route_index_prompt_title": "Bezirksindex nicht geladen",
+  "route_index_prompt": "Für genaue Dorfadressen den Bezirksindex laden (einmalig, ~7 MB). Ohne ihn werden Adressen ohne Postleitzahl evtl. ungenau verortet.",
   "settings_routemetric": "Routenoptimierung",
   "settings_routemetric_hint": "„Über Straßen“ nutzt echte Fahrstrecken (genau, Internet nötig). „Luftlinie“ ist offline und schneller.",
   "metric_road": "Über Straßen (genau)",
