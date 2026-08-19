@@ -76,5 +76,25 @@ function canonId(parsed, index) {
   ok('list: 2 blocks', blocks.length === 2, `got ${blocks.length}`);
 }
 
+// --- 5) the list TITLE / caption must NOT become an address ---------------------
+{
+  // Reproduces the real PAKETLISTE screenshot: a big gap after the title splits it into
+  // its OWN block (>=6 lines so gap-splitting is active), which must then be dropped.
+  const lines = [
+    { text: 'PAKETLISTE 30 Pakete', top: 0, height: 20 },
+    { text: 'Anna Krüger', top: 200, height: 16 },
+    { text: 'Am Markt 7', top: 220, height: 18 },
+    { text: '17109 Demmin', top: 242, height: 16 },
+    { text: 'Bernd Hoffmann', top: 300, height: 16 },
+    { text: 'Schillerstraße 21', top: 320, height: 18 },
+    { text: '17033 Neubrandenburg', top: 342, height: 16 },
+  ];
+  const text = lines.map((l) => l.text).join('\n');
+  const blocks = splitAddresses(text, lines);
+  const streets = blocks.map((b) => parseAddress(b).street);
+  ok('caption "PAKETLISTE 30 Pakete" dropped', !blocks.some((b) => /Pakete/i.test(b)), JSON.stringify(blocks));
+  ok('real addresses survive', streets.includes('Am Markt') && streets.some((s) => /Schiller/.test(s)), streets.join(','));
+}
+
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

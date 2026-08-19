@@ -6,6 +6,7 @@
 //   - page-segmentation mode tuned for a block/column of address lines
 //   - warm the worker up-front so the model download isn't paid mid-scan
 import { createWorker } from 'tesseract.js';
+import { isAddressBlock } from '../core/normalizer.js';
 
 let _worker = null;
 let _initPromise = null;
@@ -172,7 +173,6 @@ export function splitIntoAddressBlocks(text) {
     .filter((l) => l.length > 0);
 
   const isPostcodeLine = (l) => /\b\d{5}\b/.test(l);
-  const hasStreetish = (b) => /[a-zA-ZäöüÄÖÜß]/.test(b) && /\d/.test(b);
 
   const blocks = [];
   let current = [];
@@ -185,7 +185,7 @@ export function splitIntoAddressBlocks(text) {
   }
   if (current.length) blocks.push(current.join('\n'));
 
-  return blocks.filter(hasStreetish);
+  return blocks.filter(isAddressBlock);
 }
 
 // Smarter list splitter that uses TWO markers to be sure where one address ends:
@@ -206,7 +206,6 @@ export function splitAddresses(text, lines) {
     .sort((a, b) => a.top - b.top);
 
   const isPostcodeLine = (l) => /\b\d{5}\b/.test(l);
-  const hasStreetish = (b) => /[a-zA-ZäöüÄÖÜß]/.test(b) && /\d/.test(b);
 
   // Gap between consecutive lines = top of next minus bottom of current.
   const gaps = [];
@@ -238,7 +237,7 @@ export function splitAddresses(text, lines) {
   }
   if (current.length) blocks.push(current.join('\n'));
 
-  return blocks.filter(hasStreetish);
+  return blocks.filter(isAddressBlock);
 }
 
 // --- Courier-device screen extractor ---------------------------------------
@@ -326,8 +325,7 @@ export function splitDeviceScreen(text, lines) {
   }
   flush();
 
-  const hasStreetish = (b) => /[a-zA-ZäöüÄÖÜß]/.test(b) && /\d/.test(b);
-  return blocks.filter(hasStreetish);
+  return blocks.filter(isAddressBlock);
 }
 
 // --- Letter / magazine: pick the RECIPIENT block ----------------------------

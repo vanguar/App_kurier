@@ -181,8 +181,11 @@ const TYPE_EMOJI = { parcel: '📦', magazine: '📖', letter: '✉️' };
 
 // Scan MODES for the import selector. These are extraction modes, not item types:
 // `device` (courier-device screen) still produces PARCEL items, just parsed differently.
+// Both `parcel` and `device` produce PARCEL items — they differ only in WHERE the photo
+// was taken (a shared list screenshot vs the courier device screen). Labels say so, so a
+// new user doesn't think they are two different kinds of shipment.
 const SCAN_LABELS = () => ({
-  parcel: t('type_parcel'),
+  parcel: t('scan_parcel'),
   device: t('scan_device'),
   magazine: t('type_magazine'),
   letter: t('type_letter'),
@@ -563,6 +566,7 @@ async function renderImport(main) {
         }, `${SCAN_EMOJI[k]} ${label}`),
       ),
     ),
+    el('p', { class: 'hint', text: t('scan_note') }),
   ]);
   main.appendChild(typeSel);
 

@@ -83,6 +83,19 @@ function scoreStreetLine(text) {
   return score;
 }
 
+// Does a split block actually look like an address (vs a caption/header/UI junk)?
+// A real address either carries a 5-digit postcode OR has a line that scores as a genuine
+// street. This is what rejects the list TITLE "PAKETLISTE 30 Pakete" and the subtitle
+// "Screenshot ... -> Typ Paket -> Scannen" — they have letters + a number but no postcode
+// and every line scores negative (caption words like Paket / Screenshot / Scannen).
+export function isAddressBlock(text) {
+  const block = (text || '').trim();
+  if (!block) return false;
+  if (!/[a-zA-ZäöüÄÖÜß]/.test(block) || !/\d/.test(block)) return false; // needs letters + a number
+  if (/\b\d{5}\b/.test(block)) return true;                              // a postcode -> real address
+  return block.split('\n').some((l) => scoreStreetLine(l) > 0);         // else need a real street line
+}
+
 // Parse a raw address (one or more lines) into structured parts + matchKey.
 export function parseAddress(raw) {
   const cleaned = (raw || '').replace(/\r/g, '').trim();
