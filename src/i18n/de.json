@@ -113,6 +113,7 @@
   "ocr_consent_cloud": "Cloud (genauer)",
   "ocr_consent_device": "Auf dem Gerät (privat)",
   "import_ambiguous": "Diese Adresse gibt es in mehreren Orten — bitte den richtigen wählen:",
+  "import_auto_neighbor": "Dorf aus Nachbaradressen ermittelt",
   "index_reload_hint": "Das Indexformat wurde aktualisiert — bitte die Bezirks-Indexdatei in den Einstellungen neu laden.",
   "settings_ocr": "Erkennungs-Engine (OCR)",
   "ocr_cloud": "Cloud (genau)",

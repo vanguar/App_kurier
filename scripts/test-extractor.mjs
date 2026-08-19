@@ -4,6 +4,7 @@
 // CI. Real photo end-to-end checks are a separate, manual step (cloud OCR is nondeterministic).
 import { splitDeviceScreen, splitAddresses, pickReceiverBlock } from '../src/ocr/ocr.js';
 import { parseAddress } from '../src/core/normalizer.js';
+import { autoResolveByNeighbors, haversineKm } from '../src/core/cluster.js';
 
 let pass = 0;
 let fail = 0;
@@ -94,6 +95,33 @@ function canonId(parsed, index) {
   const streets = blocks.map((b) => parseAddress(b).street);
   ok('caption "PAKETLISTE 30 Pakete" dropped', !blocks.some((b) => /Pakete/i.test(b)), JSON.stringify(blocks));
   ok('real addresses survive', streets.includes('Am Markt') && streets.some((s) => /Schiller/.test(s)), streets.join(','));
+}
+
+// --- 6) spatial disambiguation: pick the village nearest resolved neighbours ---
+{
+  // Real-ish Demmin section: Seestrasse 25 -> Verchen (53.848,12.906), Seestrasse 67,
+  // then ambiguous "Dorfstraße 48" with candidates in Verchen (near) and Iven (far).
+  const stops = [
+    { coords: { lat: 53.848, lng: 12.906 }, candidates: [] },           // Verchen, resolved
+    { coords: { lat: 53.850, lng: 12.910 }, candidates: [] },           // near Verchen, resolved
+    { coords: null, candidates: [                                       // Dorfstraße 48 (ambiguous)
+      { lat: 53.796, lng: 13.434, city: 'Iven' },                       // ~35 km away
+      { lat: 53.848, lng: 12.910, city: 'Verchen' },                    // right next to neighbours
+      { lat: 54.098, lng: 13.449, city: 'Greifswald' },                 // far
+    ] },
+  ];
+  const dec = autoResolveByNeighbors(stops);
+  ok('neighbour resolve picks the nearby village', dec[2] && stops[2].candidates[dec[2].chosenIndex].city === 'Verchen', JSON.stringify(dec[2]));
+
+  // No confident pick when candidates are all far / equally distant -> leave manual.
+  const stops2 = [
+    { coords: { lat: 53.90, lng: 13.04 }, candidates: [] },
+    { coords: null, candidates: [{ lat: 54.30, lng: 13.50 }, { lat: 54.31, lng: 13.51 }] }, // both ~far, close together
+  ];
+  const dec2 = autoResolveByNeighbors(stops2);
+  ok('no confident pick -> null (manual)', dec2[1] === null, JSON.stringify(dec2[1]));
+
+  ok('haversine sanity (~111 km per degree lat)', Math.abs(haversineKm({ lat: 53, lng: 13 }, { lat: 54, lng: 13 }) - 111) < 2);
 }
 
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);

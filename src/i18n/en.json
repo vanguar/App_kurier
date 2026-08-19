@@ -113,6 +113,7 @@
   "ocr_consent_cloud": "Cloud (more accurate)",
   "ocr_consent_device": "On device (private)",
   "import_ambiguous": "This address exists in several towns — pick the right one:",
+  "import_auto_neighbor": "village inferred from neighbouring addresses",
   "index_reload_hint": "The index format was upgraded — please reload your district index file in Settings.",
   "settings_ocr": "Recognition engine (OCR)",
   "ocr_cloud": "Cloud (accurate)",

@@ -113,6 +113,7 @@
   "ocr_consent_cloud": "Chmura (dokładniej)",
   "ocr_consent_device": "Na urządzeniu (prywatnie)",
   "import_ambiguous": "Ten adres istnieje w kilku miejscowościach — wybierz właściwą:",
+  "import_auto_neighbor": "wieś ustalona na podstawie sąsiednich adresów",
   "index_reload_hint": "Format indeksu został zaktualizowany — wczytaj ponownie plik indeksu rejonu w Ustawieniach.",
   "settings_ocr": "Silnik rozpoznawania (OCR)",
   "ocr_cloud": "Chmura (dokładnie)",

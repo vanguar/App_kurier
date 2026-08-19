@@ -8,6 +8,7 @@ import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress, onlineGeocode, geocodeCenter, setGeoBounds, withinBounds, boundsActive } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2 } from '../core/matching.js';
 import { computeRoute, roadTrip, roadRoute } from '../core/route.js';
+import { autoResolveByNeighbors } from '../core/cluster.js';
 import { recognize, cloudRecognize, splitAddresses, splitDeviceScreen, pickReceiverBlock, warmUp } from '../ocr/ocr.js';
 
 let settings = null;
@@ -588,6 +589,36 @@ async function renderSettings(main) {
 // ---------- Import / Scan ----------
 let importState = { type: 'parcel', rows: [] };
 
+// Auto-pick the right village for ambiguous rows using their already-resolved list
+// neighbours (the device list is ordered by route section, so neighbours are close). A
+// newly resolved village then anchors the next ambiguous one, so we sweep a few passes.
+function autoResolveNeighbors() {
+  const rows = importState.rows;
+  for (let pass = 0; pass < 5; pass++) {
+    const stops = rows.map((r) => ({ coords: r.coords, candidates: r.candidates || [] }));
+    const decisions = autoResolveByNeighbors(stops);
+    let changed = 0;
+    decisions.forEach((dec, i) => {
+      if (!dec) return;
+      const r = rows[i];
+      const c = r.candidates && r.candidates[dec.chosenIndex];
+      if (!c) return;
+      const lk = r.parsed.lookupKey;
+      const cache = c.postcode ? `${lk}|${c.postcode}` : lk;
+      r.parsed = { ...r.parsed, postcode: c.postcode || '', city: c.city || '', matchKey: cache };
+      r.canonicalId = (c.id != null) ? `index:${c.id}` : cache;
+      r.canonicalResolved = true;
+      r.coords = { lat: c.lat, lng: c.lng };
+      r.confidence = 'green';
+      r.candidates = [];
+      r.selected = true;
+      r.autoResolved = c.city || c.street || ''; // which village won, for a review hint
+      changed++;
+    });
+    if (!changed) break;
+  }
+}
+
 // Re-attach the known postcode/city to an edited street line, so editing the house
 // number (the review field shows only street+house) does not throw away that context.
 function withAddrContext(streetValue, parsed) {
@@ -742,6 +773,7 @@ async function renderImport(main) {
         selected: g.confidence !== 'red' && !(g.candidates && g.candidates.length),
       });
     }
+    autoResolveNeighbors(); // spatially disambiguate villages using resolved list neighbours
     render();
   };
 
@@ -861,6 +893,9 @@ function renderReview() {
       el('div', { class: 'rev-body' }, [
         streetInput,
         confBadge(row.confidence),
+        row.autoResolved
+          ? el('p', { class: 'ok', text: `📍 ${t('import_auto_neighbor')}${row.autoResolved ? ` — ${row.autoResolved}` : ''}` })
+          : null,
         row.suggestion
           ? el('button', {
               class: 'link', text: `${t('suggest_prefix')} ${row.suggestion} — ${t('apply_suggestion')}`,
