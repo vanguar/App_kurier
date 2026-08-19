@@ -3,3 +3,7 @@ dist/
 *.local
 .DS_Store
 .vite/
+
+# Generated OSM address index (large, per-district, not versioned)
+/overpass*.json
+/public-index*.json

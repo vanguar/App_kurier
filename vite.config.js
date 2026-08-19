@@ -44,6 +44,17 @@ export default defineConfig({
               expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 90 },
             },
           },
+          {
+            // Bundled district index (public/district-index.json). NOT precached (would
+            // bloat install by ~7 MB); fetched on the one tap that loads it, then cached
+            // so a re-load works offline.
+            urlPattern: /district-index\.json$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'district-index',
+              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 180 },
+            },
+          },
         ],
       },
       manifest: {

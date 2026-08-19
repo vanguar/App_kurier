@@ -505,10 +505,34 @@ async function renderSettings(main) {
       toast('JSON error');
     }
   });
+  // One-tap: fetch the district index bundled with the app (no file transfer needed).
+  const idxStatus = el('p', { class: cnt ? 'ok' : 'hint',
+    text: cnt ? t('settings_index_loaded', { n: cnt }) : t('settings_index_empty') });
+  const bundledBtn = el('button', { class: 'btn primary', text: '⬇️ ' + t('settings_index_bundled') });
+  bundledBtn.addEventListener('click', async () => {
+    bundledBtn.disabled = true;
+    idxStatus.className = 'hint';
+    idxStatus.textContent = t('settings_index_downloading');
+    try {
+      const res = await fetch(`${import.meta.env.BASE_URL}district-index.json`, { cache: 'force-cache' });
+      if (!res.ok) throw new Error('http ' + res.status);
+      const data = await res.json();
+      const entries = Array.isArray(data) ? data : data.entries || [];
+      const n = await loadAddressIndex(entries);
+      await migratePointsV2().catch((e) => console.warn('point migration skipped:', e));
+      toast(t('settings_index_loaded', { n }));
+      render();
+    } catch (e) {
+      bundledBtn.disabled = false;
+      idxStatus.className = 'warn';
+      idxStatus.textContent = t('settings_index_download_err');
+    }
+  });
   const idxCard = el('div', { class: 'card' }, [
     el('label', { class: 'field-label', text: t('settings_index') }),
-    el('p', { class: cnt ? 'ok' : 'hint',
-      text: cnt ? t('settings_index_loaded', { n: cnt }) : t('settings_index_empty') }),
+    idxStatus,
+    el('p', { class: 'hint', text: t('settings_index_bundled_hint') }),
+    bundledBtn,
     el('button', { class: 'btn', text: t('settings_index_load'), onclick: () => fileInput.click() }),
     fileInput,
   ]);
