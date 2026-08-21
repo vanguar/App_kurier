@@ -46,43 +46,55 @@ function dedupeByTown(records) {
   return [...byTown.values()];
 }
 
+// PURE core of canonicalize(): decide identity from a parsed address + its raw index matches.
+// Split out from the IndexedDB read so it can be unit-tested without a database (see
+// scripts/test-geocode.mjs). Returns { canonicalId, record, candidates }:
+//   record present     -> resolved to one place, route it
+//   candidates present -> genuinely ambiguous (one entry PER TOWN), the courier picks
+export function resolveMatches(parsed, matches) {
+  if (!parsed || !parsed.lookupKey) {
+    return { canonicalId: parsed?.matchKey || '', record: null, candidates: [] };
+  }
+  if (!matches || matches.length === 0) {
+    return { canonicalId: parsed.matchKey || parsed.lookupKey, record: null, candidates: [] };
+  }
+  if (matches.length === 1) {
+    return { canonicalId: recordCanonicalId(matches[0]), record: matches[0], candidates: [] };
+  }
+  // Merge duplicate geometry for the same town FIRST, so "one street+house in one town"
+  // resolves instead of prompting with a stack of identical buttons.
+  let pool = dedupeByTown(matches);
+  if (pool.length === 1) {
+    return { canonicalId: recordCanonicalId(pool[0]), record: pool[0], candidates: [] };
+  }
+  // The town is only ambiguous when the OCR DIDN'T capture it. When the card/label shows a
+  // locality — a postcode ("17109") and/or a city name ("Demmin") — there is nothing to
+  // choose: narrow to that town instead of asking. Postcode first (most specific), then the
+  // city name as a fallback for when the postcode was mis-read. A filter that pins exactly
+  // one town resolves; one that only trims the list narrows the choices we still offer.
+  const narrow = (subset) => {
+    if (subset.length === 1) return subset[0]; // pinned exactly -> resolve, no prompt
+    if (subset.length > 1) pool = subset;      // fewer towns -> offer only these
+    return null;                               // 0 matches (mis-read) -> keep the wider pool
+  };
+  if (parsed.postcode) {
+    const hit = narrow(pool.filter((m) => m.postcode === parsed.postcode));
+    if (hit) return { canonicalId: recordCanonicalId(hit), record: hit, candidates: [] };
+  }
+  if (pool.length > 1 && parsed.city) {
+    const c = normalizeCity(parsed.city);
+    const hit = narrow(pool.filter((m) => normalizeCity(m.city) === c));
+    if (hit) return { canonicalId: recordCanonicalId(hit), record: hit, candidates: [] };
+  }
+  return { canonicalId: '', record: null, candidates: pool }; // no locality on the scan -> user picks
+}
+
 export async function canonicalize(parsed) {
   if (!parsed || !parsed.lookupKey) {
     return { canonicalId: parsed?.matchKey || '', record: null, candidates: [] };
   }
   const matches = await getIndexByLookup(parsed.lookupKey);
-  if (matches.length === 1) {
-    return { canonicalId: recordCanonicalId(matches[0]), record: matches[0], candidates: [] };
-  }
-  if (matches.length > 1) {
-    // Merge duplicate geometry for the same town FIRST, so "one street+house in one town"
-    // resolves instead of prompting with a stack of identical buttons.
-    let pool = dedupeByTown(matches);
-    if (pool.length === 1) {
-      return { canonicalId: recordCanonicalId(pool[0]), record: pool[0], candidates: [] };
-    }
-    // The town is only ambiguous when the OCR DIDN'T capture it. When the card/label shows a
-    // locality — a postcode ("17109") and/or a city name ("Demmin") — there is nothing to
-    // choose: narrow to that town instead of asking. Postcode first (most specific), then the
-    // city name as a fallback for when the postcode was mis-read. A filter that pins exactly
-    // one town resolves; one that only trims the list narrows the choices we still offer.
-    const narrow = (subset) => {
-      if (subset.length === 1) return subset[0]; // pinned exactly -> resolve, no prompt
-      if (subset.length > 1) pool = subset;      // fewer towns -> offer only these
-      return null;                               // 0 matches (mis-read) -> keep the wider pool
-    };
-    if (parsed.postcode) {
-      const hit = narrow(pool.filter((m) => m.postcode === parsed.postcode));
-      if (hit) return { canonicalId: recordCanonicalId(hit), record: hit, candidates: [] };
-    }
-    if (pool.length > 1 && parsed.city) {
-      const c = normalizeCity(parsed.city);
-      const hit = narrow(pool.filter((m) => normalizeCity(m.city) === c));
-      if (hit) return { canonicalId: recordCanonicalId(hit), record: hit, candidates: [] };
-    }
-    return { canonicalId: '', record: null, candidates: pool }; // no locality on the scan -> user picks
-  }
-  return { canonicalId: parsed.matchKey || parsed.lookupKey, record: null, candidates: [] };
+  return resolveMatches(parsed, matches);
 }
 
 // Cache the index's normalized street list. assessAddress runs once per UNRESOLVED row, and

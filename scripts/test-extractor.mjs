@@ -124,5 +124,53 @@ function canonId(parsed, index) {
   ok('haversine sanity (~111 km per degree lat)', Math.abs(haversineKm({ lat: 53, lng: 13 }, { lat: 54, lng: 13 }) - 111) < 2);
 }
 
+// --- 7) device screen chrome: tour title + tabs + bottom nav must NOT be addresses --
+{
+  // Reproduces the real "Tour 705" handheld screen: a tour title, two list tabs, a search
+  // box, right-hand route codes, a postcode line under each card, and the bottom nav.
+  const text = [
+    'Tour 705', 'Unsortiert (23)', 'Sortiert (0)', 'Q Suche',
+    '81-15', 'Gartenstraße 3', '17109 Demmin',
+    '81-15', 'Gartenstraße 2', '17109 Demmin',
+    '81-03', 'Baustraße 33', '17109 Demmin',
+    'Adressen', 'Karte',
+  ].join('\n');
+  const blocks = splitDeviceScreen(text, null);
+  ok('device: exactly 3 real cards', blocks.length === 3, `got ${blocks.length}: ${JSON.stringify(blocks)}`);
+  ok('device: "Tour 705" title dropped', !blocks.some((b) => /Tour\s*705/i.test(b)), JSON.stringify(blocks));
+  ok('device: "Unsortiert/Sortiert" tabs dropped', !blocks.some((b) => /sortiert/i.test(b)));
+  ok('device: bottom nav (Adressen/Karte) dropped', !blocks.some((b) => /Adressen|Karte/i.test(b)));
+  const keys = blocks.map((b) => parseAddress(b).lookupKey);
+  ok('device: correct street keys', JSON.stringify(keys) === JSON.stringify(['gartenstrasse|3', 'gartenstrasse|2', 'baustrasse|33']), keys.join(','));
+  // The postcode line under a card must attach so the town is captured (drives disambiguation).
+  const p0 = parseAddress(blocks[0]);
+  ok('device: postcode+city attached to card', p0.postcode === '17109' && /Demmin/i.test(p0.city), `${p0.postcode} ${p0.city}`);
+}
+
+// --- 8) poorly-read OCR: straße-suffix confusions all collapse to one key ----------
+{
+  // Every one of these is the SAME street; a mis-scan must not fork it into separate points.
+  const variants = ['Goethestraße 12', 'Goethestrasse 12', 'Goethestr. 12', 'Goethestr 12',
+    'GoethestraBe 12', 'Goethestrase 12', 'Goethestrasse12', '•Goethestraße 12'];
+  const keys = new Set(variants.map((v) => parseAddress(v).lookupKey));
+  ok('OCR straße variants collapse to one key', keys.size === 1 && keys.has('goethestrasse|12'), [...keys].join(' | '));
+
+  // Hyphenated + multiword streets normalize consistently (index uses the same normalizer).
+  ok('hyphenated street key', parseAddress('Clara-Zetkin-Straße 16').lookupKey === 'clara zetkinstrasse|16');
+  ok('multiword street key', parseAddress('Treptower Straße 6').lookupKey === 'treptowerstrasse|6');
+  // House letter + range survive; a suffix fold never eats a real word ending.
+  ok('house letter kept', parseAddress('Neubrandenburger Straße 9a').lookupKey === 'neubrandenburgerstrasse|9a');
+  ok('"-weg"/"Am ..." untouched by straße fold',
+    parseAddress('Strandweg 4').lookupKey === 'strandweg|4' && parseAddress('Am Markt 7').lookupKey === 'am markt|7');
+}
+
+// --- 9) device screen where the route code is GLUED to the street (no gap) ----------
+{
+  const text = ['Tour 812', 'Q Suche', 'Schwedenwallweg 6 81-03', 'H. Meyer', 'Nordsackgasse 3 81-03', 'A. Roth'].join('\n');
+  const blocks = splitDeviceScreen(text, null);
+  const keys = blocks.map((b) => parseAddress(b).lookupKey);
+  ok('device: glued codes stripped, 2 cards', keys.length === 2 && keys[0] === 'schwedenwallweg|6' && keys[1] === 'nordsackgasse|3', keys.join(','));
+}
+
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

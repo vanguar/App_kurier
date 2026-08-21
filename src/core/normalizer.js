@@ -51,6 +51,11 @@ export function normalizeStreetName(streetPart) {
   //   glued  "goethestr"  -> "goethestrasse"
   //   spaced "haupt str"  -> "haupt strasse"
   s = s.replace(/str$/, 'strasse');
+  // Fold common OCR misreads of the "straße" ending back to "strasse". Tesseract/cloud OCR
+  // often renders "ß" as a capital B, a single s, or "ss" ("Goethestraße" -> "GoethestraBe" /
+  // "Goethestrase"). None of "strabe/strase" is a real German street ending, so this only ever
+  // repairs a mis-scan — it can't merge two genuinely different streets.
+  s = s.replace(/stra(b|ss?)e$/, 'strasse');
   // Glue a separated suffix back onto its name: "haupt strasse" -> "hauptstrasse".
   // (A genuine two-word street like "alte poststrasse" has no space right before
   //  "strasse", so it is left intact.)
