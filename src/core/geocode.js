@@ -1,6 +1,6 @@
 // Local geocoding + OCR confidence, all offline against the district address index.
 import { getIndexEntry, getIndexByLookup, getIndexStreets, indexCount } from './db.js';
-import { normalizeStreetName, levenshtein, parseAddress } from './normalizer.js';
+import { normalizeStreetName, levenshtein, parseAddress, transliterate } from './normalizer.js';
 
 // Canonicalize an OCR candidate against the district index. This — not "restore the
 // PLZ" — is the heart of cross-format identity: a device-screen parcel (no postcode,
@@ -27,6 +27,12 @@ export function recordCanonicalId(record) {
 // runner-up test (best clearly closer than second) fails when the two closest candidates are
 // duplicates of the SAME town at the same distance. Genuine ambiguity (same street+house in
 // DIFFERENT towns) still yields one candidate per town.
+// Canonical form of a city name for comparing the OCR'd locality against index records:
+// transliterate umlauts (Demmin vs Malchín, Lütow vs Luetow), lowercase, keep only letters.
+function normalizeCity(name) {
+  return transliterate((name || '').toLowerCase()).replace(/[^a-z]/g, '');
+}
+
 function dedupeByTown(records) {
   const byTown = new Map();
   for (const r of records) {
@@ -55,14 +61,26 @@ export async function canonicalize(parsed) {
     if (pool.length === 1) {
       return { canonicalId: recordCanonicalId(pool[0]), record: pool[0], candidates: [] };
     }
-    // Narrow by the OCR postcode when we have one. Only auto-resolve if it pins EXACTLY
-    // one town — if several share that postcode too, it's still ambiguous (user picks).
+    // The town is only ambiguous when the OCR DIDN'T capture it. When the card/label shows a
+    // locality — a postcode ("17109") and/or a city name ("Demmin") — there is nothing to
+    // choose: narrow to that town instead of asking. Postcode first (most specific), then the
+    // city name as a fallback for when the postcode was mis-read. A filter that pins exactly
+    // one town resolves; one that only trims the list narrows the choices we still offer.
+    const narrow = (subset) => {
+      if (subset.length === 1) return subset[0]; // pinned exactly -> resolve, no prompt
+      if (subset.length > 1) pool = subset;      // fewer towns -> offer only these
+      return null;                               // 0 matches (mis-read) -> keep the wider pool
+    };
     if (parsed.postcode) {
-      const byPc = pool.filter((m) => m.postcode === parsed.postcode);
-      if (byPc.length === 1) return { canonicalId: recordCanonicalId(byPc[0]), record: byPc[0], candidates: [] };
-      if (byPc.length > 1) pool = byPc; // narrow the choices we offer
+      const hit = narrow(pool.filter((m) => m.postcode === parsed.postcode));
+      if (hit) return { canonicalId: recordCanonicalId(hit), record: hit, candidates: [] };
     }
-    return { canonicalId: '', record: null, candidates: pool }; // ambiguous -> user picks (one per town)
+    if (pool.length > 1 && parsed.city) {
+      const c = normalizeCity(parsed.city);
+      const hit = narrow(pool.filter((m) => normalizeCity(m.city) === c));
+      if (hit) return { canonicalId: recordCanonicalId(hit), record: hit, candidates: [] };
+    }
+    return { canonicalId: '', record: null, candidates: pool }; // no locality on the scan -> user picks
   }
   return { canonicalId: parsed.matchKey || parsed.lookupKey, record: null, candidates: [] };
 }
