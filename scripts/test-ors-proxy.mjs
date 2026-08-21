@@ -10,7 +10,7 @@ function ok(name, cond, detail = '') {
 const origin = 'https://vanguar.github.io';
 const env = { ORS_API_KEY: 'secret-test-key', ALLOWED_ORIGINS: origin };
 const payload = {
-  jobs: [{ id: 1, location: [13.05, 53.90], priority: 100 }],
+  jobs: [{ id: 1, location: [13.05, 53.90], priority: 100, group: '17109|demmin' }],
   vehicles: [{ id: 99, profile: 'anything', start: [13.04, 53.89], end: [13.04, 53.89] }],
 };
 const req = (body = payload, requestOrigin = origin) => new Request('https://worker.example/optimize', {
@@ -40,10 +40,52 @@ const req = (body = payload, requestOrigin = origin) => new Request('https://wor
   ok('proxy: current HeiGIT Directions URL', upstream[1].url === 'https://api.heigit.org/openrouteservice/v2/directions/driving-car', upstream[1].url);
   ok('proxy: Basic Key stays server-side', upstream.every((call) => call.options.headers.Authorization === 'secret-test-key'));
   ok('proxy: only driving-car vehicle forwarded', upstream[0].body.vehicles[0].profile === 'driving-car' && upstream[0].body.vehicles[0].id === 1, JSON.stringify(upstream[0].body.vehicles));
+  ok('proxy: private locality hint is stripped before VROOM', !('group' in upstream[0].body.jobs[0]), JSON.stringify(upstream[0].body.jobs[0]));
   ok('proxy: Directions follows Base -> optimized jobs -> Base', upstream[1].body.coordinates.length === 3 && upstream[1].body.coordinates[1][0] === 13.05, JSON.stringify(upstream[1].body.coordinates));
   const responseBody = await response.json();
   ok('proxy: exact road distance added', responseBody.road_distance === 4321, JSON.stringify(responseBody));
   ok('proxy: exact CORS origin returned', response.headers.get('Access-Control-Allow-Origin') === origin);
+}
+
+// A closed-loop distance solver may put a distant town in the middle of a base-town cluster
+// because the distance is almost tied. The proxy should keep one locality contiguous and ask
+// Directions for the exact length of the courier-friendly order.
+{
+  const groupedPayload = {
+    jobs: [
+      { id: 1, location: [13.0397, 53.9078], group: '17109|demmin' },
+      { id: 2, location: [13.0394, 53.9075], group: '17109|demmin' },
+      { id: 3, location: [12.7568, 54.0883], group: '18465|tribsees' },
+      { id: 4, location: [13.0457, 53.9030], group: '17109|demmin' },
+    ],
+    vehicles: [{ id: 1, start: [13.0401, 53.8925], end: [13.0401, 53.8925] }],
+  };
+  const upstream = [];
+  const response = await handleRequest(req(groupedPayload), env, async (url, options) => {
+    upstream.push({ url, body: JSON.parse(options.body) });
+    if (url.endsWith('/vroom/v0')) {
+      return new Response(JSON.stringify({
+        routes: [{ steps: [
+          { type: 'start' },
+          { type: 'job', id: 1 },
+          { type: 'job', id: 2 },
+          { type: 'job', id: 3 }, // bad: Demmin -> Tribsees -> Demmin
+          { type: 'job', id: 4 },
+          { type: 'end' },
+        ] }],
+        unassigned: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ routes: [{ summary: { distance: 76000 } }] }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  const responseBody = await response.json();
+  const ids = responseBody.routes[0].steps.filter((step) => step.type === 'job').map((step) => step.id);
+  ok('proxy: split locality is consolidated', JSON.stringify(ids) === JSON.stringify([1, 2, 4, 3]), JSON.stringify(ids));
+  ok('proxy: grouping is reported', responseBody.locality_grouping_applied === true, JSON.stringify(responseBody));
+  const directionCoords = upstream[1].body.coordinates;
+  ok('proxy: Directions measures grouped order', directionCoords[3][0] === 13.0457 && directionCoords[4][0] === 12.7568, JSON.stringify(directionCoords));
 }
 
 // Cross-origin callers and over-sized tours are rejected before ORS is called.

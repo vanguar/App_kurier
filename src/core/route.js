@@ -54,6 +54,10 @@ export async function orsOptimize(base, stops, {
       id,
       location: [s.lng, s.lat], // ORS/VROOM uses [longitude, latitude]
       ...(priority && s.priority ? { priority: 100 } : {}),
+      // The proxy uses this only as a courier-friendly tie-break: stops in the same
+      // locality should stay together when doing so does not materially lengthen the loop.
+      // It is stripped before the payload is forwarded to VROOM.
+      ...(s.group ? { group: String(s.group) } : {}),
     };
   });
   const payload = {

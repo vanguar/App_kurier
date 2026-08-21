@@ -62,9 +62,22 @@ export async function addItemAtAddress(parsed, item, geoInfo = {}) {
       canonicalId,
       canonicalResolved: !!geoInfo.canonicalResolved,
     });
-  } else if (!point.coords && geoInfo.coords) {
+  } else if (geoInfo.coords && (!point.coords || geoInfo.canonicalResolved)) {
+    // A confirmed index coordinate is authoritative. Older app versions could leave a
+    // wrong Nominatim coordinate attached to an existing point forever because they only
+    // filled an EMPTY coordinate. Refresh it whenever the exact index record is known.
     point.coords = geoInfo.coords;
     point.geocodeStatus = 'matched';
+    if (geoInfo.canonicalResolved) {
+      point.canonicalId = canonicalId;
+      point.canonicalResolved = true;
+      point.matchKey = parsed.matchKey || point.matchKey;
+      point.address = {
+        ...point.address,
+        postcode: parsed.postcode || point.address?.postcode || '',
+        city: parsed.city || point.address?.city || '',
+      };
+    }
   }
   point.items.push(item);
   await putPoint(point);
@@ -80,19 +93,36 @@ export async function migratePointsV2() {
   const points = await getPoints();
   if (!points.length) return { merged: 0 };
 
-  // 1) (Re)resolve canonicalId. A point whose id came from the INDEX (canonicalResolved)
-  // is final; one that only got a matchKey fallback (index not loaded yet) is retried on
-  // every call, so it upgrades once the district index arrives.
+  // 1) (Re)resolve canonicalId AND heal coordinates from the authoritative index. We also
+  // revisit already-resolved points: older builds could preserve a stale/wrong coordinate
+  // forever, which makes a correct optimizer produce a nonsensical town order.
   for (const p of points) {
-    if (p.canonicalResolved) continue;
     const parsed = {
       lookupKey: lookupFromMatch(p.matchKey),
       matchKey: p.matchKey,
       postcode: p.address?.postcode || '',
+      city: p.address?.city || '',
     };
     const canon = await canonicalize(parsed);
-    p.canonicalId = canon.canonicalId || p.matchKey || '';
-    p.canonicalResolved = !!canon.record; // true only when the index confirmed it
+    if (canon.record) {
+      p.canonicalId = canon.canonicalId;
+      p.canonicalResolved = true;
+      if (typeof canon.record.lat === 'number' && typeof canon.record.lng === 'number') {
+        p.coords = { lat: canon.record.lat, lng: canon.record.lng };
+        p.geocodeStatus = 'matched';
+      }
+      if (canon.record.matchKey) p.matchKey = canon.record.matchKey;
+      p.address = {
+        ...p.address,
+        postcode: canon.record.postcode || p.address?.postcode || '',
+        city: canon.record.city || p.address?.city || '',
+      };
+    } else if (!p.canonicalResolved) {
+      // Do not erase a previously confirmed identity merely because the index has not been
+      // loaded yet on this launch. Only unresolved legacy points use the fallback identity.
+      p.canonicalId = canon.canonicalId || p.matchKey || '';
+      p.canonicalResolved = false;
+    }
     await putPoint(p);
   }
 

@@ -46,5 +46,16 @@ await migratePointsV2();
 const after = await dbmod.getPoints();
 ok('v1->v3: legacy point canonicalized', after.length === 1 && after[0].canonicalId === 'index:node/1', after[0]?.canonicalId);
 
+// A point already marked canonicalResolved must still have a stale coordinate healed from
+// the authoritative index on the next launch (the old early-continue caused bad routes).
+after[0].coords = { lat: 1, lng: 2 };
+after[0].canonicalResolved = true;
+await dbmod.putPoint(after[0]);
+await migratePointsV2();
+const healed = await dbmod.getPoints();
+ok('migration heals stale coords of already-resolved points',
+  healed[0].coords?.lat === 53.71 && healed[0].coords?.lng === 13.01,
+  JSON.stringify(healed[0].coords));
+
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

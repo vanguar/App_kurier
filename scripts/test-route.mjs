@@ -93,8 +93,8 @@ function asym(n, seed) {
   const result = await orsOptimize(
     { lat: 53.89, lng: 13.04 },
     [
-      { id: 'stop-a', lat: 53.90, lng: 13.05, priority: false },
-      { id: 'stop-b', lat: 53.91, lng: 13.06, priority: true },
+      { id: 'stop-a', lat: 53.90, lng: 13.05, priority: false, group: '17109|demmin' },
+      { id: 'stop-b', lat: 53.91, lng: 13.06, priority: true, group: '18465|tribsees' },
     ],
     { endpoint: 'https://proxy.example/optimize', fetchImpl },
   );
@@ -102,6 +102,7 @@ function asym(n, seed) {
   ok('ORS: POST JSON without API key header', seen.options.method === 'POST' && !seen.options.headers.Authorization, JSON.stringify(seen.options.headers));
   ok('ORS: coordinates are [lng,lat]', seen.body.jobs[0].location[0] === 13.05 && seen.body.jobs[0].location[1] === 53.90, JSON.stringify(seen.body.jobs[0].location));
   ok('ORS: parcel priority forwarded', seen.body.jobs[1].priority === 100, JSON.stringify(seen.body.jobs[1]));
+  ok('ORS: locality group forwarded to our proxy', seen.body.jobs[0].group === '17109|demmin', JSON.stringify(seen.body.jobs[0]));
   ok('ORS: optimized job ids map back to point ids', JSON.stringify(result.orderedIds) === JSON.stringify(['stop-b', 'stop-a']), JSON.stringify(result.orderedIds));
   ok('ORS: proxy road distance/provider returned', result.totalMeters === 4321 && result.provider === 'ors', JSON.stringify(result));
 }

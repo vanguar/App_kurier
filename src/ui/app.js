@@ -1191,13 +1191,24 @@ async function renderRoute(main) {
     // A stop is "priority" if it holds at least one parcel (parcels beat mail on ties).
     const prioOn = settings.parcelPriority !== false;
     const hasParcel = (p) => Array.isArray(p.items) && p.items.some((i) => i.type === 'parcel');
+    const localityGroup = (p) => {
+      const postcode = String(p.address?.postcode || '').trim();
+      const city = String(p.address?.city || '').trim().toLocaleLowerCase('de-DE');
+      return (postcode || city) ? `${postcode}|${city}` : '';
+    };
     // Only NOT-fully-delivered points are optimized into the active route. Delivered
     // points drop out of the recalculation (so the count/route reflect what's left)
     // but are still shown, dimmed, so the courier sees where they've already been.
     const deliveredWithCoords = points.filter((p) => p.coords && pointStatus(p) === 'done');
     const stops = points
       .filter((p) => p.coords && pointStatus(p) !== 'done')
-      .map((p) => ({ id: p.id, lat: p.coords.lat, lng: p.coords.lng, priority: prioOn && hasParcel(p) }));
+      .map((p) => ({
+        id: p.id,
+        lat: p.coords.lat,
+        lng: p.coords.lng,
+        priority: prioOn && hasParcel(p),
+        group: localityGroup(p),
+      }));
     const skippedNoCoord = points.filter((p) => !p.coords && pointStatus(p) !== 'done');
 
     if (!stops.length) {
