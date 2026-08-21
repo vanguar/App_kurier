@@ -251,7 +251,10 @@ export function splitAddresses(text, lines) {
 // A route code: two short numbers joined by a dash ("81-11"), on its own or glued right.
 const ROUTE_CODE_ONLY = /^\s*\d{1,3}\s*[-–]\s*\d{1,3}\s*$/;
 // UI chrome / progress / nav labels (German + Russian + English). Whole-line matches.
-const DEVICE_CHROME = /^(q?\s*(поиск|search|suche)|остановки|информация|настройки|stops|info(rmation)?|settings|einstellungen|fertig|готово|gotowe|zrobione)\b/i;
+// Includes the device screen HEADER ("Tour 705") and the two list TABS ("Unsortiert (23)",
+// "Sortiert (0)") — these are the courier's own tour title, not a delivery address, so they
+// must never become a red "address" row.
+const DEVICE_CHROME = /^(q?\s*(поиск|search|suche)|остановки|информация|настройки|stops|info(rmation)?|settings|einstellungen|fertig|готово|gotowe|zrobione|tour|(un)?sortiert)\b/i;
 // A progress counter like "24/56" or "Готово 24 / 56".
 const COUNTER = /\b\d{1,4}\s*\/\s*\d{1,4}\b/;
 

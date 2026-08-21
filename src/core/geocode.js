@@ -19,6 +19,27 @@ export function recordCanonicalId(record) {
   return record && record.id != null ? `index:${record.id}` : '';
 }
 
+// Collapse duplicate index records that describe the SAME real address (same postcode + city)
+// down to one representative, preferring one with valid coordinates. The bundled OSM gazetteer
+// stores SEVERAL geometry objects per house — a building polygon, an address node, entrance
+// nodes — all at e.g. "Gartenstraße 2, 17109 Demmin". Left unmerged they (a) show the courier
+// five IDENTICAL "17109 Demmin" buttons, and (b) break the neighbour auto-resolver: its
+// runner-up test (best clearly closer than second) fails when the two closest candidates are
+// duplicates of the SAME town at the same distance. Genuine ambiguity (same street+house in
+// DIFFERENT towns) still yields one candidate per town.
+function dedupeByTown(records) {
+  const byTown = new Map();
+  for (const r of records) {
+    const key = `${r.postcode || ''}|${(r.city || '').toLowerCase().trim()}`;
+    const prev = byTown.get(key);
+    if (!prev) { byTown.set(key, r); continue; }
+    const rHasCoords = typeof r.lat === 'number' && typeof r.lng === 'number';
+    const prevHasCoords = typeof prev.lat === 'number' && typeof prev.lng === 'number';
+    if (rHasCoords && !prevHasCoords) byTown.set(key, r); // upgrade to a record that can be routed
+  }
+  return [...byTown.values()];
+}
+
 export async function canonicalize(parsed) {
   if (!parsed || !parsed.lookupKey) {
     return { canonicalId: parsed?.matchKey || '', record: null, candidates: [] };
@@ -28,17 +49,37 @@ export async function canonicalize(parsed) {
     return { canonicalId: recordCanonicalId(matches[0]), record: matches[0], candidates: [] };
   }
   if (matches.length > 1) {
+    // Merge duplicate geometry for the same town FIRST, so "one street+house in one town"
+    // resolves instead of prompting with a stack of identical buttons.
+    let pool = dedupeByTown(matches);
+    if (pool.length === 1) {
+      return { canonicalId: recordCanonicalId(pool[0]), record: pool[0], candidates: [] };
+    }
     // Narrow by the OCR postcode when we have one. Only auto-resolve if it pins EXACTLY
-    // one record — if several share that postcode too, it's still ambiguous (user picks).
-    let pool = matches;
+    // one town — if several share that postcode too, it's still ambiguous (user picks).
     if (parsed.postcode) {
-      const byPc = matches.filter((m) => m.postcode === parsed.postcode);
+      const byPc = pool.filter((m) => m.postcode === parsed.postcode);
       if (byPc.length === 1) return { canonicalId: recordCanonicalId(byPc[0]), record: byPc[0], candidates: [] };
       if (byPc.length > 1) pool = byPc; // narrow the choices we offer
     }
-    return { canonicalId: '', record: null, candidates: pool }; // ambiguous -> user picks
+    return { canonicalId: '', record: null, candidates: pool }; // ambiguous -> user picks (one per town)
   }
   return { canonicalId: parsed.matchKey || parsed.lookupKey, record: null, candidates: [] };
+}
+
+// Cache the index's normalized street list. assessAddress runs once per UNRESOLVED row, and
+// re-reading + re-normalizing the whole ~38k-record index on every call is what froze the
+// review screen on a 4-photo batch (cost scaled as rows × index size). Rebuild only when the
+// index size changes (a load/reset), keyed off the cheap indexCount().
+let _streetNormsCache = null;
+let _streetNormsCount = -1;
+async function getStreetNorms() {
+  const cnt = await indexCount();
+  if (_streetNormsCache && _streetNormsCount === cnt) return _streetNormsCache;
+  const streets = await getIndexStreets();
+  _streetNormsCache = streets.map((s) => ({ raw: s, norm: normalizeStreetName(s) }));
+  _streetNormsCount = cnt;
+  return _streetNormsCache;
 }
 
 // Confidence levels for the review screen:
@@ -68,8 +109,7 @@ export async function assessAddress(parsed) {
 
   // Street exists in index but not this house number?
   const normStreet = normalizeStreetName(parsed.street);
-  const streets = await getIndexStreets();
-  const streetNorms = streets.map((s) => ({ raw: s, norm: normalizeStreetName(s) }));
+  const streetNorms = await getStreetNorms();
 
   if (streetNorms.some((s) => s.norm === normStreet)) {
     return { confidence: 'yellow', coords: null, suggestion: null, reason: 'house-missing' };
