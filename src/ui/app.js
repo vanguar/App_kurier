@@ -6,7 +6,7 @@ import {
 } from '../core/db.js';
 import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress, onlineGeocode, geocodeCenter, setGeoBounds, withinBounds, boundsActive } from '../core/geocode.js';
-import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2 } from '../core/matching.js';
+import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2, sameScannedPlace } from '../core/matching.js';
 import { computeRoute, roadTrip, roadRoute } from '../core/route.js';
 import { autoResolveByNeighbors } from '../core/cluster.js';
 import { recognize, cloudRecognize, splitAddresses, splitDeviceScreen, pickReceiverBlock, warmUp } from '../ocr/ocr.js';
@@ -589,6 +589,16 @@ async function renderSettings(main) {
 // ---------- Import / Scan ----------
 let importState = { type: 'parcel', rows: [] };
 
+// Identity fields used to spot the SAME delivery scanned twice across overlapping photos
+// (see sameScannedPlace). lookupKey is the anchor that survives auto-resolution.
+const scanIdentity = (src) => ({
+  canonicalId: src.canonicalId || '',
+  lookupKey: src.parsed?.lookupKey || '',
+  postcode: src.parsed?.postcode || '',
+});
+// True if `g` (a geocodeRaw result or a row) duplicates a row already in the review list.
+const isDuplicateScan = (g) => importState.rows.some((r) => sameScannedPlace(scanIdentity(r), scanIdentity(g)));
+
 // Auto-pick the right village for ambiguous rows using their already-resolved list
 // neighbours (the device list is ordered by route section, so neighbours are close). A
 // newly resolved village then anchors the next ambiguous one, so we sweep a few passes.
@@ -631,9 +641,7 @@ async function addManualRow(raw) {
   const value = (raw || '').trim();
   if (!value) return;
   const g = await geocodeRaw(value, { online: settings.onlineGeocode !== false });
-  const gKey = g.canonicalId || g.parsed.matchKey || '';
-  const existing = new Set(importState.rows.map((r) => r.canonicalId || r.parsed.matchKey).filter(Boolean));
-  if (gKey && existing.has(gKey)) { toast(t('import_nothing')); return; }
+  if (isDuplicateScan(g)) { toast(t('import_nothing')); return; }
   importState.rows.push({
     raw: value,
     editStreet: g.parsed.display,
@@ -749,15 +757,13 @@ async function renderImport(main) {
       render();
       return;
     }
-    // Accumulate across photos (a parcel list may span 2-3 photos), de-duplicating
-    // by identity (canonicalId, else matchKey) so overlapping shots don't create doubles.
-    const rowKey = (r) => r.canonicalId || r.parsed.matchKey || '';
-    const existingKeys = new Set(importState.rows.map(rowKey).filter(Boolean));
+    // Accumulate across photos (a parcel list may span 2-3 photos), de-duplicating by place
+    // identity so overlapping shots don't create doubles — stable across auto-resolution (see
+    // sameScannedPlace). Comparing against the live row list catches duplicates within THIS
+    // batch as well as against rows resolved by earlier photos.
     for (const b of blocks) {
       const g = await geocodeRaw(b, { online: settings.onlineGeocode !== false });
-      const key = g.canonicalId || g.parsed.matchKey || '';
-      if (key && existingKeys.has(key)) continue;
-      if (key) existingKeys.add(key);
+      if (isDuplicateScan(g)) continue;
       importState.rows.push({
         raw: b,
         editStreet: g.parsed.display,

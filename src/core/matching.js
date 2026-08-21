@@ -128,6 +128,20 @@ export async function migratePointsV2() {
   return { merged };
 }
 
+// De-duplicate scanned rows ACROSS overlapping photos. Auto-resolving a village REWRITES a
+// row's canonicalId AND its matchKey (the chosen postcode gets appended), so neither is stable
+// between a freshly-scanned duplicate ("jahnstrasse|14") and its already-resolved twin
+// ("index:…", "jahnstrasse|14|17109"). The postcode-free lookupKey is the one stable anchor.
+// Two identities are the SAME delivery when they resolved to the same index record, OR share
+// street+house AND don't name two DIFFERENT towns (so a rare "same street in two towns" mail
+// batch stays split, while the overlap-duplicate — one side still postcode-less — is caught).
+// a/b: { canonicalId, lookupKey, postcode }.
+export function sameScannedPlace(a, b) {
+  if (a.canonicalId && a.canonicalId.startsWith('index:') && a.canonicalId === b.canonicalId) return true;
+  if (a.lookupKey && a.lookupKey === b.lookupKey) return !a.postcode || !b.postcode || a.postcode === b.postcode;
+  return false;
+}
+
 // Whole-point delivery status derived from its items.
 export function pointStatus(point) {
   if (!point.items.length) return 'empty';

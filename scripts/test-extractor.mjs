@@ -5,6 +5,7 @@
 import { splitDeviceScreen, splitAddresses, pickReceiverBlock } from '../src/ocr/ocr.js';
 import { parseAddress } from '../src/core/normalizer.js';
 import { autoResolveByNeighbors, haversineKm } from '../src/core/cluster.js';
+import { sameScannedPlace } from '../src/core/matching.js';
 
 let pass = 0;
 let fail = 0;
@@ -170,6 +171,26 @@ function canonId(parsed, index) {
   const blocks = splitDeviceScreen(text, null);
   const keys = blocks.map((b) => parseAddress(b).lookupKey);
   ok('device: glued codes stripped, 2 cards', keys.length === 2 && keys[0] === 'schwedenwallweg|6' && keys[1] === 'nordsackgasse|3', keys.join(','));
+}
+
+// --- 10) overlap de-dup: same delivery scanned twice must count ONCE ---------------
+{
+  const id = (canonicalId, lookupKey, postcode = '') => ({ canonicalId, lookupKey, postcode });
+  // THE bug: photo A resolved "Jahnstraße 14" to Demmin (index id + postcode filled); photo B
+  // re-scans the same card still postcode-less. Neither canonicalId nor matchKey match, but the
+  // shared lookupKey must catch it — otherwise the total counts 24 instead of 23.
+  const resolved = id('index:demmin/42', 'jahnstrasse|14', '17109');
+  const rescan = id('', 'jahnstrasse|14', '');
+  ok('dedup: resolved twin == raw re-scan', sameScannedPlace(resolved, rescan) === true);
+  ok('dedup: two raw re-scans equal', sameScannedPlace(id('', 'jahnstrasse|14'), id('', 'jahnstrasse|14')) === true);
+  ok('dedup: same index record equal', sameScannedPlace(id('index:x/1', 'a|1', '1'), id('index:x/1', 'a|1', '1')) === true);
+  ok('dedup: same postcode equal', sameScannedPlace(id('', 'a|1', '17109'), id('', 'a|1', '17109')) === true);
+  // Must NOT merge: same street+house in two DIFFERENT known towns (a real multi-town mail batch).
+  ok('dedup: same street, two towns kept apart', sameScannedPlace(id('', 'gartenstrasse|2', '17109'), id('', 'gartenstrasse|2', '17126')) === false);
+  ok('dedup: different index records kept apart', sameScannedPlace(id('index:demmin/1', 'g|2', '17109'), id('index:jarmen/9', 'g|2', '17126')) === false);
+  ok('dedup: different street kept apart', sameScannedPlace(id('', 'goethestrasse|12'), id('', 'schillerstrasse|12')) === false);
+  // An unparseable row (no lookupKey, no index id) must never swallow another.
+  ok('dedup: empty identity never matches', sameScannedPlace(id('', ''), id('', '')) === false);
 }
 
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);
