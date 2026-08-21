@@ -7,15 +7,90 @@ const R = 6371000; // Earth radius, meters
 // fetch + parse JSON with a hard timeout. The public OSRM/Nominatim servers occasionally
 // stall; without an abort the whole "Build route" tap hangs forever and no route is drawn.
 // On timeout this throws (AbortError) so the caller falls back to the offline solver.
-async function fetchJson(url, { timeoutMs = 12000 } = {}) {
+async function fetchJson(url, {
+  timeoutMs = 12000,
+  fetchImpl = globalThis.fetch,
+  method = 'GET',
+  headers,
+  body,
+} = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
+    const res = await fetchImpl(url, { method, headers, body, signal: ctrl.signal });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = await res.text(); } catch (e) { /* ignore unreadable error bodies */ }
+      throw new Error(`HTTP ${res.status}${detail ? `: ${detail.slice(0, 240)}` : ''}`);
+    }
     return await res.json();
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Primary online solver: the app talks to OUR proxy, never directly to HeiGIT, so the
+// openrouteservice API key is not embedded in the public PWA bundle. The proxy forwards this
+// VROOM-compatible request to https://api.heigit.org/vroom/v0.
+//
+// The numeric job ids are deliberately local to this request. App point ids are strings, so a
+// map restores them after VROOM returns the optimized step order.
+export async function orsOptimize(base, stops, {
+  endpoint,
+  priority = true,
+  timeoutMs = 8000,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  if (!endpoint) throw new Error('ORS proxy URL is not configured');
+  const usable = stops.filter((s) => s && typeof s.lat === 'number' && typeof s.lng === 'number');
+  const skipped = stops.filter((s) => !(s && typeof s.lat === 'number' && typeof s.lng === 'number'));
+  if (!usable.length) return { orderedIds: [], totalMeters: 0, usableCount: 0, skipped, provider: 'ors' };
+
+  const idMap = new Map();
+  const jobs = usable.map((s, i) => {
+    const id = i + 1;
+    idMap.set(id, s.id);
+    return {
+      id,
+      location: [s.lng, s.lat], // ORS/VROOM uses [longitude, latitude]
+      ...(priority && s.priority ? { priority: 100 } : {}),
+    };
+  });
+  const payload = {
+    jobs,
+    vehicles: [{
+      id: 1,
+      profile: 'driving-car',
+      start: [base.lng, base.lat],
+      end: [base.lng, base.lat],
+    }],
+  };
+  const data = await fetchJson(endpoint, {
+    timeoutMs,
+    fetchImpl,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const route = Array.isArray(data.routes) && data.routes[0];
+  if (!route || !Array.isArray(route.steps)) {
+    throw new Error(data.error || 'ORS optimization returned no route');
+  }
+  const orderedIds = route.steps
+    .filter((step) => step && step.type === 'job' && idMap.has(step.id))
+    .map((step) => idMap.get(step.id));
+  if (orderedIds.length !== usable.length || (Array.isArray(data.unassigned) && data.unassigned.length)) {
+    throw new Error('ORS optimization left one or more stops unassigned');
+  }
+  return {
+    orderedIds,
+    totalMeters: typeof data.road_distance === 'number'
+      ? data.road_distance
+      : (typeof route.distance === 'number' ? route.distance : 0),
+    usableCount: usable.length,
+    skipped,
+    provider: 'ors',
+  };
 }
 
 export function haversine(a, b) {
@@ -70,20 +145,39 @@ function nearestNeighbor(m, n) {
   return order;
 }
 
-// 2-opt: reverse segments between i..k (never touching Base at index 0).
+// True length change of reversing order[i..k] on matrix m. Reversing flips the direction of
+// every INTERNAL edge too, so on an ASYMMETRIC (directed) matrix — like an OSRM road-distance
+// table where A→B ≠ B→A — the internal edges must be re-summed, not assumed unchanged. The old
+// "boundary edges only" delta was valid only for symmetric matrices; on a directed one it
+// mis-scored moves, which both worsened routes AND could cycle forever (the reported hang).
+// For a symmetric matrix the internal sums cancel and this reduces to the classic 2-opt delta.
+function reverseDelta(order, m, i, k) {
+  const n = order.length;
+  const a = order[i - 1];
+  const b = order[i];
+  const c = order[k];
+  const d = order[(k + 1) % n]; // wraps to Base to keep the loop closed
+  let oldInternal = 0;
+  let newInternal = 0;
+  for (let t = i; t < k; t++) {
+    oldInternal += m[order[t]][order[t + 1]];
+    newInternal += m[order[t + 1]][order[t]]; // reversed direction
+  }
+  return (m[a][c] + newInternal + m[b][d]) - (m[a][b] + oldInternal + m[c][d]);
+}
+
+// 2-opt: reverse segments between i..k (never touching Base at index 0). Correct for
+// asymmetric matrices (see reverseDelta) and hard-capped so it can never spin forever.
 function twoOpt(order, m) {
   const n = order.length;
+  const maxPasses = 4 * n * n + 50; // safety cap; a correct 2-opt converges well within this
   let improved = true;
-  while (improved) {
+  let passes = 0;
+  while (improved && passes++ < maxPasses) {
     improved = false;
     for (let i = 1; i < n - 1; i++) {
       for (let k = i + 1; k < n; k++) {
-        const a = order[i - 1];
-        const b = order[i];
-        const c = order[k];
-        const d = order[(k + 1) % n]; // wraps to Base to keep loop closed
-        const delta = m[a][c] + m[b][d] - m[a][b] - m[c][d];
-        if (delta < -1e-6) {
+        if (reverseDelta(order, m, i, k) < -1e-6) {
           let lo = i;
           let hi = k;
           while (lo < hi) {
@@ -99,11 +193,15 @@ function twoOpt(order, m) {
   return order;
 }
 
-// Or-opt: move single stops to a better position (cleans up what 2-opt misses).
+// Or-opt: move single stops to a better position (cleans up what 2-opt misses). The
+// remove/insert deltas use directed edges, so they are already correct on an asymmetric
+// matrix; the pass count is still hard-capped as a safety net against pathological input.
 function orOpt(order, m) {
   const n = order.length;
+  const maxPasses = 4 * n * n + 50;
   let improved = true;
-  while (improved) {
+  let passes = 0;
+  while (improved && passes++ < maxPasses) {
     improved = false;
     for (let i = 1; i < n; i++) {
       const prev = order[i - 1];
@@ -133,7 +231,7 @@ function orOpt(order, m) {
 // Solve a closed-loop TSP from node 0 over a real-distance matrix. Nearest-neighbor
 // seed + 2-opt/Or-opt polish, PLUS random restarts to escape local minima (cheap
 // for a courier's <=100 stops). Returns the best tour found and its true length.
-function solveMatrix(real) {
+export function solveMatrix(real) {
   const n = real.length;
   const polish = (o) => {
     o = twoOpt(o, real);
@@ -207,7 +305,7 @@ function reorderByPriority(order, real, priority) {
 // Closed loop from Base. Throws on error so the caller can fall back. Nulls in the
 // matrix (unreachable pairs) are estimated from straight-line distance.
 // base: {lat,lng}, stops: [{id,lat,lng,priority}].
-export async function roadRoute(base, stops, { priority = true } = {}) {
+export async function roadRoute(base, stops, { priority = true, timeoutMs = 6500 } = {}) {
   const usable = stops.filter((s) => s && typeof s.lat === 'number' && typeof s.lng === 'number');
   const skipped = stops.filter((s) => !(s && typeof s.lat === 'number' && typeof s.lng === 'number'));
   if (!usable.length) return { orderedIds: [], totalMeters: 0, usableCount: 0, skipped };
@@ -215,7 +313,7 @@ export async function roadRoute(base, stops, { priority = true } = {}) {
   const nodes = [{ lat: base.lat, lng: base.lng, id: '__base__', priority: false }, ...usable];
   const coordStr = nodes.map((p) => `${p.lng},${p.lat}`).join(';');
   const url = `https://router.project-osrm.org/table/v1/driving/${coordStr}?annotations=distance`;
-  const data = await fetchJson(url);
+  const data = await fetchJson(url, { timeoutMs });
   if (data.code !== 'Ok' || !Array.isArray(data.distances)) {
     throw new Error(data.message || 'OSRM table error');
   }
@@ -228,21 +326,21 @@ export async function roadRoute(base, stops, { priority = true } = {}) {
   order = reorderByPriority(order, real, prio); // then nudge parcels earlier on ties
   const totalMeters = tourLength(order, real);
   const orderedIds = order.slice(1).map((idx) => nodes[idx].id);
-  return { orderedIds, totalMeters, usableCount: usable.length, skipped };
+  return { orderedIds, totalMeters, usableCount: usable.length, skipped, provider: 'osrm' };
 }
 
 // Road-network optimization via the public OSRM "trip" service (solves TSP on real
 // roads, closed loop from Base). No priority weighting — kept as a fallback for
 // roadRoute. Throws on error so the caller can fall back to the straight-line
 // solver. base: {lat,lng}, stops: [{id,lat,lng}].
-export async function roadTrip(base, stops) {
+export async function roadTrip(base, stops, { timeoutMs = 3500 } = {}) {
   const usable = stops.filter((s) => s && typeof s.lat === 'number' && typeof s.lng === 'number');
   const skipped = stops.filter((s) => !(s && typeof s.lat === 'number' && typeof s.lng === 'number'));
   if (!usable.length) return { orderedIds: [], totalMeters: 0, usableCount: 0, skipped };
 
   const coordStr = [base, ...usable].map((p) => `${p.lng},${p.lat}`).join(';');
   const url = `https://router.project-osrm.org/trip/v1/driving/${coordStr}?source=first&roundtrip=true&overview=false`;
-  const data = await fetchJson(url);
+  const data = await fetchJson(url, { timeoutMs });
   if (data.code !== 'Ok' || !Array.isArray(data.waypoints)) {
     throw new Error(data.message || 'OSRM error');
   }
@@ -252,7 +350,7 @@ export async function roadTrip(base, stops) {
   // Position 0 is Base (source=first). Remaining positions map to stops (input i-1).
   const orderedIds = inputAtPos.filter((i) => i !== 0).map((i) => usable[i - 1].id);
   const totalMeters = (data.trips && data.trips[0] && data.trips[0].distance) || 0;
-  return { orderedIds, totalMeters, usableCount: usable.length, skipped };
+  return { orderedIds, totalMeters, usableCount: usable.length, skipped, provider: 'osrm' };
 }
 
 // base: {lat,lng}. stops: [{id, lat, lng, ...}]. Returns ordered stop ids + total meters.
@@ -274,5 +372,5 @@ export function computeRoute(base, stops) {
   // Drop Base(0) from output; caller knows the loop starts & ends at Base.
   const orderedIds = order.slice(1).map((idx) => nodes[idx].id);
 
-  return { orderedIds, totalMeters, usableCount: usable.length, skipped };
+  return { orderedIds, totalMeters, usableCount: usable.length, skipped, provider: 'straight' };
 }

@@ -158,6 +158,8 @@
   "metric_road": "Po drogach (dokładnie)",
   "metric_straight": "W linii prostej (offline)",
   "route_calc_road": "Liczę trasę po drogach…",
+  "route_calc_ors": "Optymalizuję trasę przez openrouteservice…",
+  "route_by_ors": "Kolejność zoptymalizowana przez openrouteservice po realnych drogach.",
   "route_by_road": "Kolejność zoptymalizowana po realnych drogach.",
   "route_by_straight": "Kolejność w linii prostej (tryb offline).",
   "settings_priority": "Priorytet paczek",

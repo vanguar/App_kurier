@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/test-extractor.mjs && node scripts/test-geocode.mjs && node scripts/test-db.mjs && node scripts/test-migrate.mjs"
+    "test": "node scripts/test-extractor.mjs && node scripts/test-geocode.mjs && node scripts/test-route.mjs && node scripts/test-ors-proxy.mjs && node scripts/test-db.mjs && node scripts/test-migrate.mjs"
   },
   "dependencies": {
     "idb": "8.0.0",

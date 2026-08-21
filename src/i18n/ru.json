@@ -158,6 +158,8 @@
   "metric_road": "По дорогам (точно)",
   "metric_straight": "По прямой (офлайн)",
   "route_calc_road": "Считаю маршрут по дорогам…",
+  "route_calc_ors": "Оптимизирую маршрут через openrouteservice…",
+  "route_by_ors": "Порядок оптимизирован openrouteservice по реальным дорогам.",
   "route_by_road": "Порядок оптимизирован по реальным дорогам.",
   "route_by_straight": "Порядок по прямой (офлайн-режим).",
   "settings_priority": "Приоритет посылкам",

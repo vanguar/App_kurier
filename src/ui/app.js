@@ -7,12 +7,15 @@ import {
 import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress, onlineGeocode, geocodeCenter, setGeoBounds, withinBounds, boundsActive } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2, sameScannedPlace } from '../core/matching.js';
-import { computeRoute, roadTrip, roadRoute } from '../core/route.js';
+import { computeRoute, orsOptimize, roadTrip, roadRoute } from '../core/route.js';
 import { autoResolveByNeighbors } from '../core/cluster.js';
 import { recognize, cloudRecognize, splitAddresses, splitDeviceScreen, pickReceiverBlock, warmUp } from '../ocr/ocr.js';
 
 let settings = null;
 const app = document.getElementById('app');
+// Public URL of our key-hiding Worker proxy. This value is safe to ship; the ORS API key is
+// stored only as the Worker's ORS_API_KEY secret and never enters this bundle.
+const ORS_PROXY_URL = (import.meta.env.VITE_ORS_PROXY_URL || '').trim();
 
 // ---------- theme ----------
 function resolveTheme(theme) {
@@ -599,6 +602,18 @@ const scanIdentity = (src) => ({
 // True if `g` (a geocodeRaw result or a row) duplicates a row already in the review list.
 const isDuplicateScan = (g) => importState.rows.some((r) => sameScannedPlace(scanIdentity(r), scanIdentity(g)));
 
+// Drop duplicate review rows in place, keeping the first occurrence. Runs AFTER neighbour
+// auto-resolution so it can compare by resolved identity (see sameScannedPlace) — this is what
+// makes an overlap-scanned stop count once without ever risking a real cross-town delivery.
+function dedupeReviewRows() {
+  const kept = [];
+  for (const r of importState.rows) {
+    if (kept.some((k) => sameScannedPlace(scanIdentity(k), scanIdentity(r)))) continue;
+    kept.push(r);
+  }
+  importState.rows = kept;
+}
+
 // Auto-pick the right village for ambiguous rows using their already-resolved list
 // neighbours (the device list is ordered by route section, so neighbours are close). A
 // newly resolved village then anchors the next ambiguous one, so we sweep a few passes.
@@ -757,13 +772,11 @@ async function renderImport(main) {
       render();
       return;
     }
-    // Accumulate across photos (a parcel list may span 2-3 photos), de-duplicating by place
-    // identity so overlapping shots don't create doubles — stable across auto-resolution (see
-    // sameScannedPlace). Comparing against the live row list catches duplicates within THIS
-    // batch as well as against rows resolved by earlier photos.
+    // Accumulate across photos (a parcel list may span 2-3 photos). Add every block first, THEN
+    // resolve + de-duplicate: an overlap duplicate can only be recognised safely once its town
+    // is known, so the dedupe runs after autoResolveNeighbors (see sameScannedPlace / dedupeReviewRows).
     for (const b of blocks) {
       const g = await geocodeRaw(b, { online: settings.onlineGeocode !== false });
-      if (isDuplicateScan(g)) continue;
       importState.rows.push({
         raw: b,
         editStreet: g.parsed.display,
@@ -780,6 +793,7 @@ async function renderImport(main) {
       });
     }
     autoResolveNeighbors(); // spatially disambiguate villages using resolved list neighbours
+    dedupeReviewRows();     // now that towns are known, collapse overlap duplicates safely
     render();
   };
 
@@ -1011,7 +1025,9 @@ function statsBar(points) {
   return el('div', { class: 'card statsbar' }, [
     cell('📦', t('type_parcel'), c.parcel, 'parcel'),
     cell('📖✉️', t('stat_mail'), c.mail, 'mail'),
-    cell('Σ', t('stat_total'), c.total, 'total'),
+    // Headline = number of delivery POINTS in the list (stops), not the item count, so it
+    // always matches the rows the courier sees.
+    cell('📍', t('stat_total'), c.stops, 'total'),
   ]);
 }
 
@@ -1122,7 +1138,17 @@ async function renderRoute(main) {
   main.appendChild(result);
 
   buildBtn.addEventListener('click', async () => {
-    const points = await getPoints();
+    if (buildBtn.disabled) return;
+    buildBtn.disabled = true;
+    try {
+      const points = await getPoints();
+
+    // Overall budget for the ONLINE geocoding phase. Each Nominatim call is throttled to ~1/s,
+    // so on many missing points the sequential loop could otherwise run for minutes and look
+    // frozen. When the budget runs out we stop geocoding and route with the coords we already
+    // have; the rest are reported as "skipped — no coordinates", not left to hang.
+    const GEO_BUDGET_MS = 18000;
+    const geoDeadline = Date.now() + GEO_BUDGET_MS;
 
     // Re-validate STORED coords against the search area. An ambiguous (no-postcode) point
     // whose saved coordinate lands outside the area was geocoded to a wrong same-named town
@@ -1135,6 +1161,7 @@ async function renderRoute(main) {
         const status = el('p', { class: 'hint' });
         result.appendChild(status);
         for (let i = 0; i < stale.length; i++) {
+          if (Date.now() > geoDeadline) break;
           status.textContent = t('route_revalidating', { i: i + 1, n: stale.length });
           const p = stale[i];
           const c = await onlineGeocode({ ...p.address, matchKey: p.matchKey });
@@ -1153,6 +1180,7 @@ async function renderRoute(main) {
       const status = el('p', { class: 'hint' });
       result.appendChild(status);
       for (let i = 0; i < missing.length; i++) {
+        if (Date.now() > geoDeadline) break; // overall budget spent -> route with what we have
         status.textContent = t('route_geocoding', { i: i + 1, n: missing.length });
         const p = missing[i];
         const c = await onlineGeocode({ ...p.address, matchKey: p.matchKey });
@@ -1184,29 +1212,53 @@ async function renderRoute(main) {
       return;
     }
 
-    // Prefer real-road optimization (OSRM). Fall back to straight-line on error/offline.
+    // Online priority: openrouteservice/VROOM through our key-hiding Worker proxy. If ORS is
+    // unavailable or not configured, fall back to OSRM and finally to the offline solver.
+    // One shared deadline bounds the entire online-routing phase instead of stacking several
+    // independent long waits that look like a frozen button.
     clear(result);
     const status = el('p', { class: 'hint' });
     result.appendChild(status);
     let routed = null;
     const wantRoad = (settings.routeMetric || 'road') === 'road';
     if (wantRoad && navigator.onLine && stops.length <= 100) {
-      status.textContent = t('route_calc_road');
-      // Prefer the priority-aware road solver (OSRM table + our TSP); if that
-      // endpoint fails, fall back to OSRM trip (no priority), then straight-line.
-      try {
-        routed = await roadRoute(settings.base.coords, stops, { priority: prioOn });
-      } catch (e) {
+      const onlineDeadline = Date.now() + 15000;
+      const remaining = () => Math.max(0, onlineDeadline - Date.now());
+      if (ORS_PROXY_URL && stops.length <= 48) {
+        status.textContent = t('route_calc_ors');
         try {
-          routed = await roadTrip(settings.base.coords, stops);
-        } catch (e2) {
+          routed = await orsOptimize(settings.base.coords, stops, {
+            endpoint: ORS_PROXY_URL,
+            priority: prioOn,
+            timeoutMs: Math.min(12000, remaining()),
+          });
+        } catch (e) {
+          console.warn('ORS optimization unavailable; falling back:', e?.message || e);
+        }
+      }
+      if (!routed && remaining() > 1000) {
+        status.textContent = t('route_calc_road');
+        try {
+          routed = await roadRoute(settings.base.coords, stops, {
+            priority: prioOn,
+            timeoutMs: Math.min(6000, remaining()),
+          });
+        } catch (e) {
+          console.warn('OSRM table unavailable; falling back:', e?.message || e);
+        }
+      }
+      if (!routed && remaining() > 1000) {
+        try {
+          routed = await roadTrip(settings.base.coords, stops, {
+            timeoutMs: Math.min(3000, remaining()),
+          });
+        } catch (e) {
           routed = null;
         }
       }
     }
-    const byRoad = !!routed;
     if (!routed) routed = computeRoute(settings.base.coords, stops);
-    const { orderedIds, totalMeters } = routed;
+    const { orderedIds, totalMeters, provider = 'straight' } = routed;
 
     // persist routeOrder
     const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
@@ -1215,7 +1267,10 @@ async function renderRoute(main) {
       await putPoint(p);
     }
 
-    renderRouteResult(result, points, orderedIds, totalMeters, skippedNoCoord.length, byRoad, deliveredWithCoords);
+      renderRouteResult(result, points, orderedIds, totalMeters, skippedNoCoord.length, provider, deliveredWithCoords);
+    } finally {
+      buildBtn.disabled = false;
+    }
   });
 }
 
@@ -1267,13 +1322,16 @@ function navSheet(coords, label) {
   document.body.appendChild(overlay);
 }
 
-function renderRouteResult(result, points, orderedIds, totalMeters, skipped, byRoad, delivered = []) {
+function renderRouteResult(result, points, orderedIds, totalMeters, skipped, provider, delivered = []) {
   clear(result);
   const byId = new Map(points.map((p) => [p.id, p]));
   const km = (totalMeters / 1000).toFixed(1);
 
   result.appendChild(el('p', { class: 'route-sum', text: t('route_summary', { n: orderedIds.length, km }) }));
-  result.appendChild(el('p', { class: 'hint', text: byRoad ? t('route_by_road') : t('route_by_straight') }));
+  const sourceText = provider === 'ors'
+    ? t('route_by_ors')
+    : (provider === 'osrm' ? t('route_by_road') : t('route_by_straight'));
+  result.appendChild(el('p', { class: 'hint', text: sourceText }));
   result.appendChild(el('div', { class: 'stop base', text: `🏁 ${t('route_base')}` }));
 
   orderedIds.forEach((id, i) => {

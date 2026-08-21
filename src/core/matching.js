@@ -67,7 +67,6 @@ export async function addItemAtAddress(parsed, item, geoInfo = {}) {
     point.geocodeStatus = 'matched';
   }
   point.items.push(item);
-  point.items = dedupeItems(point.items); // same card added twice -> keep one (never inflate the total)
   await putPoint(point);
   return point;
 }
@@ -126,50 +125,25 @@ export async function migratePointsV2() {
     // One transaction: save survivor + delete all duplicates together (crash-atomic).
     await mergePointsTx(keep, dupIds);
   }
-
-  // 3) Self-heal any point that already holds duplicate OCR items (the same card scanned twice
-  // in an earlier build, before import de-dup existed). Idempotent — a clean point is untouched.
-  for (const p of await getPoints()) {
-    const deduped = dedupeItems(p.items);
-    if (deduped.length !== (p.items || []).length) {
-      p.items = deduped;
-      await putPoint(p);
-    }
-  }
   return { merged };
 }
 
-// De-duplicate scanned rows ACROSS overlapping photos. Auto-resolving a village REWRITES a
-// row's canonicalId AND its matchKey (the chosen postcode gets appended), so neither is stable
-// between a freshly-scanned duplicate ("jahnstrasse|14") and its already-resolved twin
-// ("index:…", "jahnstrasse|14|17109"). The postcode-free lookupKey is the one stable anchor.
-// Two identities are the SAME delivery when they resolved to the same index record, OR share
-// street+house AND don't name two DIFFERENT towns (so a rare "same street in two towns" mail
-// batch stays split, while the overlap-duplicate — one side still postcode-less — is caught).
+// De-duplicate scanned rows that are the SAME delivery across overlapping photos. Meant to run
+// AFTER neighbour auto-resolution, so most rows already carry an index canonicalId.
+//   - both resolved to an index record -> duplicate iff it is the SAME record (exact, safe);
+//   - exactly ONE resolved -> NOT treated as a duplicate. A resolved town + a still-unresolved
+//     "street|house" could be two DIFFERENT towns; merging them could silently drop a real
+//     delivery, so we keep both (a visible duplicate is recoverable, a lost stop is not);
+//   - NEITHER resolved -> duplicate only when street+house match AND the postcodes are
+//     compatible (both empty, or equal): the genuine overlap of two raw re-scans in one batch.
 // a/b: { canonicalId, lookupKey, postcode }.
 export function sameScannedPlace(a, b) {
-  if (a.canonicalId && a.canonicalId.startsWith('index:') && a.canonicalId === b.canonicalId) return true;
-  if (a.lookupKey && a.lookupKey === b.lookupKey) return !a.postcode || !b.postcode || a.postcode === b.postcode;
+  const aRes = !!a.canonicalId && a.canonicalId.startsWith('index:');
+  const bRes = !!b.canonicalId && b.canonicalId.startsWith('index:');
+  if (aRes && bRes) return a.canonicalId === b.canonicalId;
+  if (aRes || bRes) return false;
+  if (a.lookupKey && a.lookupKey === b.lookupKey) return (!a.postcode && !b.postcode) || a.postcode === b.postcode;
   return false;
-}
-
-// Drop duplicate OCR items within one point: the SAME card scanned twice across overlapping
-// photos creates two items with different ids but the SAME recognized text, which inflated the
-// total (24 for a 23-stop tour). Items of a DIFFERENT type (a parcel + a letter at one address)
-// or manually-added items (no rawText) are always kept. A delivered copy wins over a pending one.
-export function dedupeItems(items) {
-  const best = new Map(); // key -> chosen item
-  const order = [];
-  for (const it of (items || [])) {
-    const raw = (it.rawText || '').replace(/\s+/g, ' ').trim();
-    const key = it.source === 'ocr' && raw ? `${it.type}|${raw}` : null;
-    if (!key) { order.push(it); continue; } // manual / textless -> never merged
-    const prev = best.get(key);
-    if (!prev) { best.set(key, it); order.push({ __key: key }); continue; }
-    // Keep whichever is already delivered (don't lose a completed delivery).
-    if (prev.status !== 'delivered' && it.status === 'delivered') best.set(key, it);
-  }
-  return order.map((o) => (o.__key ? best.get(o.__key) : o));
 }
 
 // Whole-point delivery status derived from its items.
@@ -185,7 +159,11 @@ export function itemTypeCounts(point) {
   return c;
 }
 
-// Totals across all points: parcels, mail (magazines + letters), and grand total.
+// Totals across all points. `parcel`/`mail` are ITEM counts (how many of each to deliver),
+// but `stops` — and the headline `total` — count the DELIVERY POINTS actually shown in the
+// list. That is what the courier reads off the screen: a stop with two parcels is still ONE
+// place to drive to, so the total must equal the number of rows in the list, not the number
+// of items (which is why a double-scanned card once made the total read 24 for a 23-stop tour).
 export function aggregateCounts(points) {
   const c = { parcel: 0, magazine: 0, letter: 0, delivered: 0 };
   for (const p of points) {
@@ -195,6 +173,8 @@ export function aggregateCounts(points) {
     }
   }
   c.mail = c.magazine + c.letter;
-  c.total = c.parcel + c.magazine + c.letter;
+  c.items = c.parcel + c.magazine + c.letter; // total individual shipments
+  c.stops = points.filter((p) => p.items && p.items.length).length; // delivery points in the list
+  c.total = c.stops; // the headline number mirrors the visible list
   return c;
 }

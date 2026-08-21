@@ -114,5 +114,35 @@ const gartenstr2 = [
   ok('no matches -> fallback id, no candidates', !res.record && !res.candidates.length && !!res.canonicalId, JSON.stringify(res));
 }
 
+// --- 11) proximity de-dup: only CO-LOCATED geometry merges (Codex: 3.2 km apart bug) -
+{
+  // Two records share street+house+postcode+city but sit 3.2 km apart -> DIFFERENT houses
+  // (real case: "Dorfstraße 17" in two hamlets both addressed "Bartow"). Must stay 2 candidates,
+  // never silently collapse to one coordinate.
+  const bartow = [
+    { id: 'a', lookupKey: 'dorfstrasse|17', postcode: '', city: 'Bartow', lat: 53.8300, lng: 13.2000 },
+    { id: 'b', lookupKey: 'dorfstrasse|17', postcode: '', city: 'Bartow', lat: 53.8000, lng: 13.2300 }, // ~3.6 km away
+  ];
+  const res = resolveMatches(parseAddress('Dorfstraße 17'), bartow);
+  ok('far-apart same-town houses stay separate', prompted(res) && res.candidates.length === 2, JSON.stringify(res.record || res.candidates));
+
+  // The Demmin trio (within metres) must still collapse to one.
+  const demminTrio = gartenstr2.filter((r) => r.postcode === '17109');
+  const res2 = resolveMatches(parseAddress('Gartenstraße 2'), demminTrio);
+  ok('co-located geometry still merges to 1', landed(res2, '17109'), JSON.stringify(res2.record || res2.candidates));
+}
+
+// --- 12) postcode/city CONTRADICTION -> prompt, never a silent wrong town (Codex) ---
+{
+  // Card shows "Demmin", but the 5 digits were mis-read into Jarmen's real postcode. Trusting
+  // the postcode alone would deliver to the wrong town; the two towns must be offered instead.
+  const p = { ...parseAddress('Gartenstraße 2'), postcode: '17126', city: 'Demmin' };
+  const res = resolveMatches(p, gartenstr2);
+  ok('conflict PLZ(Jarmen)+city(Demmin) -> prompt, not silent', prompted(res), JSON.stringify(res.record || res.candidates));
+  const towns = new Set(res.candidates.map((c) => c.city));
+  ok('conflict prompt offers exactly the two plausible towns', towns.size === 2 && towns.has('Demmin') && towns.has('Jarmen'), [...towns].join(','));
+  ok('conflict never resolves to the mis-read town', !(res.record && res.record.city === 'Jarmen'));
+}
+
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

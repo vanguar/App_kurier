@@ -158,6 +158,8 @@
   "metric_road": "By roads (accurate)",
   "metric_straight": "Straight-line (offline)",
   "route_calc_road": "Computing road route…",
+  "route_calc_ors": "Optimizing route with openrouteservice…",
+  "route_by_ors": "Order optimized by openrouteservice on real roads.",
   "route_by_road": "Order optimized on real roads.",
   "route_by_straight": "Order by straight-line (offline mode).",
   "settings_priority": "Parcel priority",

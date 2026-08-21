@@ -1,6 +1,7 @@
 // Local geocoding + OCR confidence, all offline against the district address index.
 import { getIndexEntry, getIndexByLookup, getIndexStreets, indexCount } from './db.js';
 import { normalizeStreetName, levenshtein, parseAddress, transliterate } from './normalizer.js';
+import { haversineKm } from './cluster.js';
 
 // Canonicalize an OCR candidate against the district index. This — not "restore the
 // PLZ" — is the heart of cross-format identity: a device-screen parcel (no postcode,
@@ -19,31 +20,35 @@ export function recordCanonicalId(record) {
   return record && record.id != null ? `index:${record.id}` : '';
 }
 
-// Collapse duplicate index records that describe the SAME real address (same postcode + city)
-// down to one representative, preferring one with valid coordinates. The bundled OSM gazetteer
-// stores SEVERAL geometry objects per house — a building polygon, an address node, entrance
-// nodes — all at e.g. "Gartenstraße 2, 17109 Demmin". Left unmerged they (a) show the courier
-// five IDENTICAL "17109 Demmin" buttons, and (b) break the neighbour auto-resolver: its
-// runner-up test (best clearly closer than second) fails when the two closest candidates are
-// duplicates of the SAME town at the same distance. Genuine ambiguity (same street+house in
-// DIFFERENT towns) still yields one candidate per town.
 // Canonical form of a city name for comparing the OCR'd locality against index records:
 // transliterate umlauts (Demmin vs Malchín, Lütow vs Luetow), lowercase, keep only letters.
 function normalizeCity(name) {
   return transliterate((name || '').toLowerCase()).replace(/[^a-z]/g, '');
 }
 
+// ~150 m: two records this close, with the same postcode+city, are duplicate OSM GEOMETRY of
+// ONE house (building polygon + address node + entrance nodes) — safe to merge. Anything
+// farther is a DIFFERENT house that merely shares a street+house+postcode+city (the district
+// index has 29 such pairs, up to 3.2 km apart) and must survive as its own candidate.
+const DUP_RADIUS_KM = 0.15;
+
+// Merge ONLY co-located duplicate geometry of the same house; keep genuinely distinct houses
+// (even when they share street/house/postcode/city) as separate candidates. This kills the
+// "five identical 17109 Demmin buttons" without ever silently collapsing two real houses to one
+// coordinate. Records without coordinates can't be proximity-checked, so each is kept as-is.
 function dedupeByTown(records) {
-  const byTown = new Map();
+  const reps = [];
   for (const r of records) {
-    const key = `${r.postcode || ''}|${(r.city || '').toLowerCase().trim()}`;
-    const prev = byTown.get(key);
-    if (!prev) { byTown.set(key, r); continue; }
     const rHasCoords = typeof r.lat === 'number' && typeof r.lng === 'number';
-    const prevHasCoords = typeof prev.lat === 'number' && typeof prev.lng === 'number';
-    if (rHasCoords && !prevHasCoords) byTown.set(key, r); // upgrade to a record that can be routed
+    const twin = rHasCoords && reps.find((p) =>
+      typeof p.lat === 'number'
+      && (p.postcode || '') === (r.postcode || '')
+      && normalizeCity(p.city) === normalizeCity(r.city)
+      && haversineKm(p, r) <= DUP_RADIUS_KM);
+    if (twin) continue; // same physical house already represented
+    reps.push(r);
   }
-  return [...byTown.values()];
+  return reps;
 }
 
 // PURE core of canonicalize(): decide identity from a parsed address + its raw index matches.
@@ -68,25 +73,29 @@ export function resolveMatches(parsed, matches) {
     return { canonicalId: recordCanonicalId(pool[0]), record: pool[0], candidates: [] };
   }
   // The town is only ambiguous when the OCR DIDN'T capture it. When the card/label shows a
-  // locality — a postcode ("17109") and/or a city name ("Demmin") — there is nothing to
-  // choose: narrow to that town instead of asking. Postcode first (most specific), then the
-  // city name as a fallback for when the postcode was mis-read. A filter that pins exactly
-  // one town resolves; one that only trims the list narrows the choices we still offer.
-  const narrow = (subset) => {
-    if (subset.length === 1) return subset[0]; // pinned exactly -> resolve, no prompt
-    if (subset.length > 1) pool = subset;      // fewer towns -> offer only these
-    return null;                               // 0 matches (mis-read) -> keep the wider pool
-  };
-  if (parsed.postcode) {
-    const hit = narrow(pool.filter((m) => m.postcode === parsed.postcode));
-    if (hit) return { canonicalId: recordCanonicalId(hit), record: hit, candidates: [] };
+  // locality — a postcode ("17109") and/or a city name ("Demmin") — narrow to that town.
+  const R = (rec) => ({ canonicalId: recordCanonicalId(rec), record: rec, candidates: [] });
+  const AMB = (list) => ({ canonicalId: '', record: null, candidates: list });
+  const cityNorm = parsed.city ? normalizeCity(parsed.city) : '';
+  const matchPc = (m) => !!parsed.postcode && m.postcode === parsed.postcode;
+  const matchCity = (m) => !!cityNorm && normalizeCity(m.city) === cityNorm;
+  const byPc = parsed.postcode ? pool.filter(matchPc) : [];
+  const byCity = cityNorm ? pool.filter(matchCity) : [];
+  const agree = pool.filter((m) => matchPc(m) && matchCity(m));
+
+  // CONTRADICTION guard: the postcode points at one town and the city at a DIFFERENT one (e.g.
+  // "Demmin" printed, but the 5 digits were mis-read into Jarmen's real postcode). Trusting the
+  // postcode blindly would silently deliver to the wrong town — so never auto-resolve a
+  // conflict; offer just the two plausible towns and let neighbour-resolution / the courier decide.
+  if (byPc.length && byCity.length && !agree.length) {
+    return AMB([...new Set([...byPc, ...byCity])]);
   }
-  if (pool.length > 1 && parsed.city) {
-    const c = normalizeCity(parsed.city);
-    const hit = narrow(pool.filter((m) => normalizeCity(m.city) === c));
-    if (hit) return { canonicalId: recordCanonicalId(hit), record: hit, candidates: [] };
-  }
-  return { canonicalId: '', record: null, candidates: pool }; // no locality on the scan -> user picks
+  // Otherwise narrow by the strongest signal we have: postcode+city agreement, else postcode,
+  // else city. Exactly one town -> resolve; several -> offer just those; none -> ask over all.
+  const narrowed = agree.length ? agree : (byPc.length ? byPc : byCity);
+  if (narrowed.length === 1) return R(narrowed[0]);
+  if (narrowed.length > 1) pool = narrowed;
+  return AMB(pool); // no locality on the scan -> user (or neighbour-resolver) picks
 }
 
 export async function canonicalize(parsed) {

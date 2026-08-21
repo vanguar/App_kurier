@@ -1,0 +1,7 @@
+name = "kurier-ors-proxy"
+main = "src/index.js"
+compatibility_date = "2026-08-21"
+
+[vars]
+# Browser Origin values only (no path). Keep the production GitHub Pages origin and local dev.
+ALLOWED_ORIGINS = "https://vanguar.github.io,http://localhost:5173,http://127.0.0.1:5173"

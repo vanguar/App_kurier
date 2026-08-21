@@ -26,6 +26,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # Public Worker URL, e.g. https://kurier-ors-proxy.<subdomain>.workers.dev/optimize
+          # Configure in GitHub: Settings -> Secrets and variables -> Actions -> Variables.
+          VITE_ORS_PROXY_URL: ${{ vars.ORS_PROXY_URL }}
       - name: Enable & configure Pages
         uses: actions/configure-pages@v5
         with:

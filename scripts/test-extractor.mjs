@@ -5,7 +5,7 @@
 import { splitDeviceScreen, splitAddresses, pickReceiverBlock } from '../src/ocr/ocr.js';
 import { parseAddress } from '../src/core/normalizer.js';
 import { autoResolveByNeighbors, haversineKm } from '../src/core/cluster.js';
-import { sameScannedPlace, dedupeItems } from '../src/core/matching.js';
+import { sameScannedPlace, aggregateCounts } from '../src/core/matching.js';
 
 let pass = 0;
 let fail = 0;
@@ -173,44 +173,34 @@ function canonId(parsed, index) {
   ok('device: glued codes stripped, 2 cards', keys.length === 2 && keys[0] === 'schwedenwallweg|6' && keys[1] === 'nordsackgasse|3', keys.join(','));
 }
 
-// --- 10) overlap de-dup: same delivery scanned twice must count ONCE ---------------
+// --- 10) overlap de-dup identity (runs AFTER auto-resolution, so it is SAFE) --------
 {
   const id = (canonicalId, lookupKey, postcode = '') => ({ canonicalId, lookupKey, postcode });
-  // THE bug: photo A resolved "Jahnstraße 14" to Demmin (index id + postcode filled); photo B
-  // re-scans the same card still postcode-less. Neither canonicalId nor matchKey match, but the
-  // shared lookupKey must catch it — otherwise the total counts 24 instead of 23.
-  const resolved = id('index:demmin/42', 'jahnstrasse|14', '17109');
-  const rescan = id('', 'jahnstrasse|14', '');
-  ok('dedup: resolved twin == raw re-scan', sameScannedPlace(resolved, rescan) === true);
-  ok('dedup: two raw re-scans equal', sameScannedPlace(id('', 'jahnstrasse|14'), id('', 'jahnstrasse|14')) === true);
-  ok('dedup: same index record equal', sameScannedPlace(id('index:x/1', 'a|1', '1'), id('index:x/1', 'a|1', '1')) === true);
-  ok('dedup: same postcode equal', sameScannedPlace(id('', 'a|1', '17109'), id('', 'a|1', '17109')) === true);
-  // Must NOT merge: same street+house in two DIFFERENT known towns (a real multi-town mail batch).
-  ok('dedup: same street, two towns kept apart', sameScannedPlace(id('', 'gartenstrasse|2', '17109'), id('', 'gartenstrasse|2', '17126')) === false);
+  // Both rows resolved to the SAME index record -> the same delivery scanned twice.
+  ok('dedup: same index record == duplicate', sameScannedPlace(id('index:demmin/42', 'jahnstrasse|14', '17109'), id('index:demmin/42', 'jahnstrasse|14', '17109')) === true);
+  // Both resolved to DIFFERENT records -> two real, different stops.
   ok('dedup: different index records kept apart', sameScannedPlace(id('index:demmin/1', 'g|2', '17109'), id('index:jarmen/9', 'g|2', '17126')) === false);
+  // SAFETY (Codex): one resolved, one not — could be two different towns, so NEVER merge.
+  ok('dedup: resolved vs unresolved kept apart', sameScannedPlace(id('index:demmin/42', 'jahnstrasse|14', '17109'), id('', 'jahnstrasse|14', '')) === false);
+  // Both still UNRESOLVED (ambiguous card scanned twice), same street+house, no town -> duplicate.
+  ok('dedup: two raw re-scans equal', sameScannedPlace(id('', 'jahnstrasse|14'), id('', 'jahnstrasse|14')) === true);
+  // Two unresolved with the SAME postcode -> duplicate; with DIFFERENT postcodes -> kept apart.
+  ok('dedup: unresolved same postcode equal', sameScannedPlace(id('', 'a|1', '17109'), id('', 'a|1', '17109')) === true);
+  ok('dedup: unresolved different postcode kept apart', sameScannedPlace(id('', 'a|1', '17109'), id('', 'a|1', '17126')) === false);
   ok('dedup: different street kept apart', sameScannedPlace(id('', 'goethestrasse|12'), id('', 'schillerstrasse|12')) === false);
-  // An unparseable row (no lookupKey, no index id) must never swallow another.
   ok('dedup: empty identity never matches', sameScannedPlace(id('', ''), id('', '')) === false);
 }
 
-// --- 11) item de-dup within a point: same card twice counts once ------------------
+// --- 11) counter: the headline total mirrors the DISPLAYED list of stops -----------
 {
-  const ocr = (type, rawText, status = 'pending', id = Math.random()) => ({ id, type, source: 'ocr', rawText, status });
-  // The reported bug: one stop ended up with the SAME parcel twice -> total 24 not 23.
-  const twice = dedupeItems([ocr('parcel', 'Jahnstraße 14\n17109 Demmin'), ocr('parcel', 'Jahnstraße 14\n17109 Demmin')]);
-  ok('items: identical OCR parcel deduped to 1', twice.length === 1, `got ${twice.length}`);
-  // Whitespace/case differences in OCR text still collapse.
-  const spaced = dedupeItems([ocr('parcel', 'Jahnstraße 14  17109 Demmin'), ocr('parcel', 'Jahnstraße 14 17109 Demmin')]);
-  ok('items: whitespace variants collapse', spaced.length === 1, `got ${spaced.length}`);
-  // A parcel AND a letter at the same address are DIFFERENT deliveries -> both kept.
-  const mixed = dedupeItems([ocr('parcel', 'Am Markt 7'), ocr('letter', 'Am Markt 7')]);
-  ok('items: parcel + letter both kept', mixed.length === 2, `got ${mixed.length}`);
-  // Manually-added items (no rawText) are never merged, even if same type.
-  const manual = dedupeItems([{ id: 1, type: 'parcel', source: 'manual', rawText: '' }, { id: 2, type: 'parcel', source: 'manual', rawText: '' }]);
-  ok('items: manual items never merged', manual.length === 2, `got ${manual.length}`);
-  // A delivered copy is preserved over a pending duplicate.
-  const del = dedupeItems([ocr('parcel', 'X 1', 'pending', 'a'), ocr('parcel', 'X 1', 'delivered', 'b')]);
-  ok('items: delivered copy wins', del.length === 1 && del[0].status === 'delivered', JSON.stringify(del));
+  const parcel = (status = 'pending') => ({ type: 'parcel', status });
+  // 23 stops; stop #14 (index 13) holds two parcels (e.g. an overlap left a duplicate item).
+  const pts = [];
+  for (let i = 0; i < 23; i++) pts.push({ items: [parcel(), ...(i === 13 ? [parcel()] : [])] });
+  const c = aggregateCounts(pts);
+  ok('counter: total = 23 stops (not 24 items)', c.total === 23 && c.stops === 23, `stops=${c.stops} total=${c.total}`);
+  ok('counter: item breakdown stays truthful', c.items === 24 && c.parcel === 24, `items=${c.items} parcel=${c.parcel}`);
+  ok('counter: an empty point is not a stop', aggregateCounts([{ items: [] }]).stops === 0);
 }
 
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);

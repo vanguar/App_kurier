@@ -158,6 +158,8 @@
   "metric_road": "Über Straßen (genau)",
   "metric_straight": "Luftlinie (offline)",
   "route_calc_road": "Berechne Straßenroute…",
+  "route_calc_ors": "Route wird mit openrouteservice optimiert…",
+  "route_by_ors": "Reihenfolge mit openrouteservice auf echten Straßen optimiert.",
   "route_by_road": "Reihenfolge auf echten Straßen optimiert.",
   "route_by_straight": "Reihenfolge per Luftlinie (Offline-Modus).",
   "settings_priority": "Paket-Priorität",
