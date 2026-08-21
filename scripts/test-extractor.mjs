@@ -5,7 +5,7 @@
 import { splitDeviceScreen, splitAddresses, pickReceiverBlock } from '../src/ocr/ocr.js';
 import { parseAddress } from '../src/core/normalizer.js';
 import { autoResolveByNeighbors, haversineKm } from '../src/core/cluster.js';
-import { sameScannedPlace } from '../src/core/matching.js';
+import { sameScannedPlace, dedupeItems } from '../src/core/matching.js';
 
 let pass = 0;
 let fail = 0;
@@ -191,6 +191,26 @@ function canonId(parsed, index) {
   ok('dedup: different street kept apart', sameScannedPlace(id('', 'goethestrasse|12'), id('', 'schillerstrasse|12')) === false);
   // An unparseable row (no lookupKey, no index id) must never swallow another.
   ok('dedup: empty identity never matches', sameScannedPlace(id('', ''), id('', '')) === false);
+}
+
+// --- 11) item de-dup within a point: same card twice counts once ------------------
+{
+  const ocr = (type, rawText, status = 'pending', id = Math.random()) => ({ id, type, source: 'ocr', rawText, status });
+  // The reported bug: one stop ended up with the SAME parcel twice -> total 24 not 23.
+  const twice = dedupeItems([ocr('parcel', 'Jahnstraße 14\n17109 Demmin'), ocr('parcel', 'Jahnstraße 14\n17109 Demmin')]);
+  ok('items: identical OCR parcel deduped to 1', twice.length === 1, `got ${twice.length}`);
+  // Whitespace/case differences in OCR text still collapse.
+  const spaced = dedupeItems([ocr('parcel', 'Jahnstraße 14  17109 Demmin'), ocr('parcel', 'Jahnstraße 14 17109 Demmin')]);
+  ok('items: whitespace variants collapse', spaced.length === 1, `got ${spaced.length}`);
+  // A parcel AND a letter at the same address are DIFFERENT deliveries -> both kept.
+  const mixed = dedupeItems([ocr('parcel', 'Am Markt 7'), ocr('letter', 'Am Markt 7')]);
+  ok('items: parcel + letter both kept', mixed.length === 2, `got ${mixed.length}`);
+  // Manually-added items (no rawText) are never merged, even if same type.
+  const manual = dedupeItems([{ id: 1, type: 'parcel', source: 'manual', rawText: '' }, { id: 2, type: 'parcel', source: 'manual', rawText: '' }]);
+  ok('items: manual items never merged', manual.length === 2, `got ${manual.length}`);
+  // A delivered copy is preserved over a pending duplicate.
+  const del = dedupeItems([ocr('parcel', 'X 1', 'pending', 'a'), ocr('parcel', 'X 1', 'delivered', 'b')]);
+  ok('items: delivered copy wins', del.length === 1 && del[0].status === 'delivered', JSON.stringify(del));
 }
 
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);

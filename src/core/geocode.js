@@ -191,10 +191,19 @@ async function nominatim(paramsObj, { bounded = true } = {}) {
   _lastNominatim = Date.now();
   const limits = bounded ? boundsParams() : {};
   const params = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'de', ...limits, ...paramsObj });
-  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
-    headers: { Accept: 'application/json' },
-  });
-  const arr = await res.json();
+  // Hard timeout: a stalled Nominatim request must not hang the whole route/geocode loop.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  let arr;
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+      headers: { Accept: 'application/json' },
+      signal: ctrl.signal,
+    });
+    arr = await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
   const hit = Array.isArray(arr) && arr[0];
   return hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : null;
 }

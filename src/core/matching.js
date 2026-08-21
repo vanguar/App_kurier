@@ -67,6 +67,7 @@ export async function addItemAtAddress(parsed, item, geoInfo = {}) {
     point.geocodeStatus = 'matched';
   }
   point.items.push(item);
+  point.items = dedupeItems(point.items); // same card added twice -> keep one (never inflate the total)
   await putPoint(point);
   return point;
 }
@@ -125,6 +126,16 @@ export async function migratePointsV2() {
     // One transaction: save survivor + delete all duplicates together (crash-atomic).
     await mergePointsTx(keep, dupIds);
   }
+
+  // 3) Self-heal any point that already holds duplicate OCR items (the same card scanned twice
+  // in an earlier build, before import de-dup existed). Idempotent — a clean point is untouched.
+  for (const p of await getPoints()) {
+    const deduped = dedupeItems(p.items);
+    if (deduped.length !== (p.items || []).length) {
+      p.items = deduped;
+      await putPoint(p);
+    }
+  }
   return { merged };
 }
 
@@ -140,6 +151,25 @@ export function sameScannedPlace(a, b) {
   if (a.canonicalId && a.canonicalId.startsWith('index:') && a.canonicalId === b.canonicalId) return true;
   if (a.lookupKey && a.lookupKey === b.lookupKey) return !a.postcode || !b.postcode || a.postcode === b.postcode;
   return false;
+}
+
+// Drop duplicate OCR items within one point: the SAME card scanned twice across overlapping
+// photos creates two items with different ids but the SAME recognized text, which inflated the
+// total (24 for a 23-stop tour). Items of a DIFFERENT type (a parcel + a letter at one address)
+// or manually-added items (no rawText) are always kept. A delivered copy wins over a pending one.
+export function dedupeItems(items) {
+  const best = new Map(); // key -> chosen item
+  const order = [];
+  for (const it of (items || [])) {
+    const raw = (it.rawText || '').replace(/\s+/g, ' ').trim();
+    const key = it.source === 'ocr' && raw ? `${it.type}|${raw}` : null;
+    if (!key) { order.push(it); continue; } // manual / textless -> never merged
+    const prev = best.get(key);
+    if (!prev) { best.set(key, it); order.push({ __key: key }); continue; }
+    // Keep whichever is already delivered (don't lose a completed delivery).
+    if (prev.status !== 'delivered' && it.status === 'delivered') best.set(key, it);
+  }
+  return order.map((o) => (o.__key ? best.get(o.__key) : o));
 }
 
 // Whole-point delivery status derived from its items.

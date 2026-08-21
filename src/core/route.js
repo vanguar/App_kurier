@@ -4,6 +4,20 @@
 
 const R = 6371000; // Earth radius, meters
 
+// fetch + parse JSON with a hard timeout. The public OSRM/Nominatim servers occasionally
+// stall; without an abort the whole "Build route" tap hangs forever and no route is drawn.
+// On timeout this throws (AbortError) so the caller falls back to the offline solver.
+async function fetchJson(url, { timeoutMs = 12000 } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function haversine(a, b) {
   const toRad = (d) => (d * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat);
@@ -201,8 +215,7 @@ export async function roadRoute(base, stops, { priority = true } = {}) {
   const nodes = [{ lat: base.lat, lng: base.lng, id: '__base__', priority: false }, ...usable];
   const coordStr = nodes.map((p) => `${p.lng},${p.lat}`).join(';');
   const url = `https://router.project-osrm.org/table/v1/driving/${coordStr}?annotations=distance`;
-  const res = await fetch(url);
-  const data = await res.json();
+  const data = await fetchJson(url);
   if (data.code !== 'Ok' || !Array.isArray(data.distances)) {
     throw new Error(data.message || 'OSRM table error');
   }
@@ -229,8 +242,7 @@ export async function roadTrip(base, stops) {
 
   const coordStr = [base, ...usable].map((p) => `${p.lng},${p.lat}`).join(';');
   const url = `https://router.project-osrm.org/trip/v1/driving/${coordStr}?source=first&roundtrip=true&overview=false`;
-  const res = await fetch(url);
-  const data = await res.json();
+  const data = await fetchJson(url);
   if (data.code !== 'Ok' || !Array.isArray(data.waypoints)) {
     throw new Error(data.message || 'OSRM error');
   }
