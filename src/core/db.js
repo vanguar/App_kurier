@@ -229,3 +229,10 @@ export async function getIndexStreets() {
   for (const e of all) set.add(e.street);
   return [...set];
 }
+
+// Full index snapshot for coordinate-quality checks. Callers cache this per index size,
+// so the ~7 MB district file is read only once per app session instead of once per address.
+export async function getIndexEntries() {
+  const d = await db();
+  return (await d.getAll('addressIndex')) || [];
+}

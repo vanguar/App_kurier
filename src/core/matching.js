@@ -2,7 +2,7 @@
 // If a point with the same matchKey exists, the item "sticks" to it (that's how a
 // magazine ends up on the same checklist as a parcel). Otherwise a new point is created.
 import { findPointByCanonical, getPoints, putPoint, mergePointsTx, uid } from './db.js';
-import { canonicalize } from './geocode.js';
+import { canonicalize, validateIndexRecord } from './geocode.js';
 
 // "street|house|plz" -> "street|house" (postcode-free key), for pre-v2 points.
 function lookupFromMatch(matchKey) {
@@ -23,7 +23,17 @@ export function makeItem({ type, source = 'manual', rawText = '', note = '' }) {
   };
 }
 
-export function makePoint(parsed, { coords = null, geocodeStatus = 'notfound', verified = false, canonicalId = '', canonicalResolved = false } = {}) {
+export function makePoint(parsed, {
+  coords = null,
+  geocodeStatus = 'notfound',
+  verified = false,
+  canonicalId = '',
+  canonicalResolved = false,
+  coordinateSuspicious = false,
+  coordinateDistanceM = 0,
+  coordinateFallbackHouse = '',
+  coordinateManual = false,
+} = {}) {
   return {
     id: uid(),
     matchKey: parsed.matchKey,
@@ -41,6 +51,13 @@ export function makePoint(parsed, { coords = null, geocodeStatus = 'notfound', v
       display: parsed.display,
     },
     coords,
+    // An exact address-index hit can still contain a physically implausible map pin.
+    // Automatic coordinates are only rough route-order hints: navigation uses the full
+    // postal address until the courier saves a trusted entrance from the phone's GPS.
+    coordinateSuspicious,
+    coordinateDistanceM,
+    coordinateFallbackHouse,
+    coordinateManual,
     geocodeStatus, // 'matched' | 'notfound' | 'manual'
     verified,
     items: [],
@@ -61,13 +78,20 @@ export async function addItemAtAddress(parsed, item, geoInfo = {}) {
       verified: geoInfo.verified || false,
       canonicalId,
       canonicalResolved: !!geoInfo.canonicalResolved,
+      coordinateSuspicious: !!geoInfo.coordinateSuspicious,
+      coordinateDistanceM: geoInfo.coordinateDistanceM || 0,
+      coordinateFallbackHouse: geoInfo.coordinateFallbackHouse || '',
+      coordinateManual: !!geoInfo.coordinateManual,
     });
-  } else if (geoInfo.coords && (!point.coords || geoInfo.canonicalResolved)) {
+  } else if (geoInfo.coords && !point.coordinateManual && (!point.coords || geoInfo.canonicalResolved)) {
     // A confirmed index coordinate is authoritative. Older app versions could leave a
     // wrong Nominatim coordinate attached to an existing point forever because they only
     // filled an EMPTY coordinate. Refresh it whenever the exact index record is known.
     point.coords = geoInfo.coords;
     point.geocodeStatus = 'matched';
+    point.coordinateSuspicious = !!geoInfo.coordinateSuspicious;
+    point.coordinateDistanceM = geoInfo.coordinateDistanceM || 0;
+    point.coordinateFallbackHouse = geoInfo.coordinateFallbackHouse || '';
     if (geoInfo.canonicalResolved) {
       point.canonicalId = canonicalId;
       point.canonicalResolved = true;
@@ -105,11 +129,17 @@ export async function migratePointsV2() {
     };
     const canon = await canonicalize(parsed);
     if (canon.record) {
+      const coordinateQuality = await validateIndexRecord(canon.record);
       p.canonicalId = canon.canonicalId;
       p.canonicalResolved = true;
-      if (typeof canon.record.lat === 'number' && typeof canon.record.lng === 'number') {
-        p.coords = { lat: canon.record.lat, lng: canon.record.lng };
+      if (coordinateQuality.coords && !p.coordinateManual) {
+        p.coords = coordinateQuality.coords;
         p.geocodeStatus = 'matched';
+      }
+      if (!p.coordinateManual) {
+        p.coordinateSuspicious = coordinateQuality.suspicious;
+        p.coordinateDistanceM = coordinateQuality.nearestMeters || 0;
+        p.coordinateFallbackHouse = coordinateQuality.fallbackHouse || '';
       }
       if (canon.record.matchKey) p.matchKey = canon.record.matchKey;
       p.address = {

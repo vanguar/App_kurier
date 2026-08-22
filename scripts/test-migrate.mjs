@@ -57,5 +57,15 @@ ok('migration heals stale coords of already-resolved points',
   healed[0].coords?.lat === 53.71 && healed[0].coords?.lng === 13.01,
   JSON.stringify(healed[0].coords));
 
+// A courier-saved GPS entrance is stronger than the map index and must survive restarts.
+healed[0].coords = { lat: 53.70001, lng: 13.02002 };
+healed[0].coordinateManual = true;
+await dbmod.putPoint(healed[0]);
+await migratePointsV2();
+const manual = await dbmod.getPoints();
+ok('migration preserves courier-saved GPS entrance',
+  manual[0].coords?.lat === 53.70001 && manual[0].coords?.lng === 13.02002 && manual[0].coordinateManual === true,
+  JSON.stringify(manual[0]));
+
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

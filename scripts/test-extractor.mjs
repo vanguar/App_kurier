@@ -203,5 +203,12 @@ function canonId(parsed, index) {
   ok('counter: an empty point is not a stop', aggregateCounts([{ items: [] }]).stops === 0);
 }
 
+// --- 12) phone status bar must not become a fake address -------------------------
+{
+  const blocks = splitDeviceScreen('4G MZI0\nKastanienallee 1\n17109 Demmin', null);
+  const keys = blocks.map((b) => parseAddress(b).lookupKey);
+  ok('OCR status: 4G MZI0 dropped', keys.length === 1 && keys[0] === 'kastanienallee|1', JSON.stringify(blocks));
+}
+
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

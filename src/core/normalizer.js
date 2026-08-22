@@ -75,6 +75,13 @@ const NON_STREET_WORDS = /\b(brief(e)?|paket(e)?|p(ä|ae)ckchen|sendung\w*|zeits
 const STREET_SUFFIX = /(stra(ß|ss)e|str|weg|allee|platz|ring|damm|ufer|gasse|steig|steg|chaussee|graben|markt|anger|wall|hof|kamp|koppel|redder|twiete|reihe|zeile|winkel|kehre|pfad|promenade|berg|feld|br(ü|ue)cke|tor)$/i;
 const STREET_PREFIX = /^(am|an|auf|bei|beim|hinter|im|in|vor|zum|zur|zu|neben|unter)\b/i;
 
+// Phone/status-bar OCR junk ("4G MZI0", "5G+", "VoLTE 33") can look like a street
+// because it contains letters and ends in a digit. It is UI chrome, never an address line.
+const SYSTEM_UI_LINE = /^(?:\d{1,2}:\d{2}\s*)?(?:[345]g(?:\+)?|lte|volte|wifi|wlan|nr5g)\b/i;
+export function isSystemUiLine(text) {
+  return SYSTEM_UI_LINE.test(String(text || '').trim());
+}
+
 function scoreStreetLine(text) {
   const t = text.trim();
   const nameOnly = t.replace(/[\s.,]*\d+\s*[a-zA-Z]?\s*$/, '').trim(); // drop trailing house no.
@@ -96,6 +103,7 @@ function scoreStreetLine(text) {
 export function isAddressBlock(text) {
   const block = (text || '').trim();
   if (!block) return false;
+  if (block.split('\n').every(isSystemUiLine)) return false;
   if (!/[a-zA-ZäöüÄÖÜß]/.test(block) || !/\d/.test(block)) return false; // needs letters + a number
   if (/\b\d{5}\b/.test(block)) return true;                              // a postcode -> real address
   return block.split('\n').some((l) => scoreStreetLine(l) > 0);         // else need a real street line

@@ -1,5 +1,5 @@
 // Local geocoding + OCR confidence, all offline against the district address index.
-import { getIndexEntry, getIndexByLookup, getIndexStreets, indexCount } from './db.js';
+import { getIndexEntry, getIndexByLookup, getIndexStreets, getIndexEntries, indexCount } from './db.js';
 import { normalizeStreetName, levenshtein, parseAddress, transliterate } from './normalizer.js';
 import { haversineKm } from './cluster.js';
 
@@ -24,6 +24,126 @@ export function recordCanonicalId(record) {
 // transliterate umlauts (Demmin vs Malchín, Lütow vs Luetow), lowercase, keep only letters.
 function normalizeCity(name) {
   return transliterate((name || '').toLowerCase()).replace(/[^a-z]/g, '');
+}
+
+// A coordinate can be an exact OSM address match and still be physically wrong (for
+// example, an address node accidentally moved hundreds of metres into a field). Detect
+// that offline by comparing the point with other numbered houses on the SAME street and
+// in the SAME locality. We only warn when the street has enough neighbours and the point
+// is both absolutely far away and far relative to the street's normal house spacing.
+const OUTLIER_MIN_OTHER_HOUSES = 4;
+const OUTLIER_MIN_KM = 0.25;
+const OUTLIER_SPACING_FACTOR = 5;
+
+function recordStreetKey(record) {
+  const fromLookup = String(record?.lookupKey || record?.matchKey || '').split('|')[0];
+  return fromLookup || normalizeStreetName(record?.street || '');
+}
+
+function recordHouseKey(record) {
+  return String(record?.houseNumber || '').toLowerCase().replace(/\s+/g, '');
+}
+
+function hasCoords(record) {
+  return record && Number.isFinite(record.lat) && Number.isFinite(record.lng);
+}
+
+function sameAnchoredLocality(target, candidate) {
+  const targetPc = String(target?.postcode || '').trim();
+  const candidatePc = String(candidate?.postcode || '').trim();
+  const targetCity = normalizeCity(target?.city || '');
+  const candidateCity = normalizeCity(candidate?.city || '');
+
+  if (targetPc && candidatePc && targetPc !== candidatePc) return false;
+  if (targetCity && candidateCity && targetCity !== candidateCity) return false;
+  // At least one positive locality match is required. Postcode/city-less rural streets
+  // can span several hamlets, so guessing an outlier there would be unsafe.
+  return !!((targetPc && candidatePc === targetPc) || (targetCity && candidateCity === targetCity));
+}
+
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Pure/testable core. A warning never silently replaces one unverified map coordinate with
+// another: neighbouring houses can be wrong too. The original coordinate remains available
+// only as a rough route-order hint; navigation opens by full address until the courier saves
+// a trusted GPS entrance manually (see app.js).
+export function assessIndexCoordinate(record, streetRecords) {
+  const exact = hasCoords(record) ? { lat: record.lat, lng: record.lng } : null;
+  const safe = {
+    suspicious: false,
+    coords: exact,
+    originalCoords: exact,
+    nearestMeters: 0,
+    thresholdMeters: 0,
+    fallbackHouse: '',
+  };
+  if (!exact) return safe;
+
+  const streetKey = recordStreetKey(record);
+  const targetHouse = recordHouseKey(record);
+  if (!streetKey || !targetHouse) return safe;
+
+  const others = (streetRecords || []).filter((r) =>
+    hasCoords(r)
+    && recordStreetKey(r) === streetKey
+    && recordHouseKey(r)
+    && recordHouseKey(r) !== targetHouse
+    && sameAnchoredLocality(record, r));
+
+  // Collapse duplicate OSM geometry for one house (building + entrance + address node).
+  const byHouse = new Map();
+  for (const r of others) if (!byHouse.has(recordHouseKey(r))) byHouse.set(recordHouseKey(r), r);
+  const neighbours = [...byHouse.values()];
+  if (neighbours.length < OUTLIER_MIN_OTHER_HOUSES) return safe;
+
+  let nearest = null;
+  let nearestKm = Infinity;
+  for (const r of neighbours) {
+    const km = haversineKm(record, r);
+    if (km < nearestKm) { nearestKm = km; nearest = r; }
+  }
+
+  // Normal spacing is the median nearest-neighbour distance among the OTHER houses.
+  // Median keeps one other bad map node from weakening the check.
+  const normalSpacings = neighbours.map((a) => {
+    let best = Infinity;
+    for (const b of neighbours) {
+      if (a === b) continue;
+      best = Math.min(best, haversineKm(a, b));
+    }
+    return best;
+  });
+  const normalKm = median(normalSpacings);
+  const thresholdKm = Math.max(OUTLIER_MIN_KM, normalKm * OUTLIER_SPACING_FACTOR);
+  if (!(nearestKm > thresholdKm)) return { ...safe, nearestMeters: Math.round(nearestKm * 1000), thresholdMeters: Math.round(thresholdKm * 1000) };
+
+  return {
+    suspicious: true,
+    coords: exact,
+    originalCoords: exact,
+    nearestMeters: Math.round(nearestKm * 1000),
+    thresholdMeters: Math.round(thresholdKm * 1000),
+    fallbackHouse: '',
+  };
+}
+
+let _indexEntriesCache = null;
+let _indexEntriesCount = -1;
+async function indexEntriesCached() {
+  const count = await indexCount();
+  if (_indexEntriesCache && _indexEntriesCount === count) return _indexEntriesCache;
+  _indexEntriesCache = await getIndexEntries();
+  _indexEntriesCount = count;
+  return _indexEntriesCache;
+}
+
+export async function validateIndexRecord(record) {
+  return assessIndexCoordinate(record, await indexEntriesCached());
 }
 
 // ~150 m: two records this close, with the same postcode+city, are duplicate OSM GEOMETRY of
@@ -288,6 +408,7 @@ export async function geocodeRaw(raw, { online = true } = {}) {
   // 1) Canonicalize against the district index first — the authoritative source.
   const canon = await canonicalize(parsed);
   if (canon.record) {
+    const coordinateQuality = await validateIndexRecord(canon.record);
     // The index is AUTHORITATIVE for this street+house: overwrite postcode/city with its
     // values (not just fill blanks). This both completes a device-screen address (no PLZ)
     // AND fixes a stale PLZ left over from editing (old "Dorfstraße 48, PLZ A" -> typed
@@ -302,14 +423,30 @@ export async function geocodeRaw(raw, { online = true } = {}) {
       parsed,
       canonicalId: canon.canonicalId,
       canonicalResolved: true, // confirmed by the district index
-      coords: { lat: canon.record.lat, lng: canon.record.lng },
-      confidence: 'green',
+      coords: coordinateQuality.coords,
+      confidence: coordinateQuality.suspicious ? 'yellow' : 'green',
+      coordinateSuspicious: coordinateQuality.suspicious,
+      coordinateDistanceM: coordinateQuality.nearestMeters,
+      coordinateFallbackHouse: coordinateQuality.fallbackHouse,
       suggestion: null,
       candidates: [],
-      reason: 'index',
+      reason: coordinateQuality.suspicious ? 'index-coordinate-outlier' : 'index',
     };
   }
   if (canon.candidates.length) {
+    const candidates = await Promise.all(canon.candidates.map(async (candidate) => {
+      const quality = await validateIndexRecord(candidate);
+      return {
+        ...candidate,
+        originalLat: candidate.lat,
+        originalLng: candidate.lng,
+        lat: quality.coords?.lat ?? candidate.lat,
+        lng: quality.coords?.lng ?? candidate.lng,
+        coordinateSuspicious: quality.suspicious,
+        coordinateDistanceM: quality.nearestMeters,
+        coordinateFallbackHouse: quality.fallbackHouse,
+      };
+    }));
     // Same street+house in several towns — routable but ambiguous; user must choose.
     return {
       parsed,
@@ -318,7 +455,7 @@ export async function geocodeRaw(raw, { online = true } = {}) {
       coords: null,
       confidence: 'yellow',
       suggestion: null,
-      candidates: canon.candidates,
+      candidates,
       reason: 'ambiguous',
     };
   }

@@ -3,7 +3,7 @@
 // the courier. Runs against the REAL resolveMatches() (the pure core of canonicalize), so the
 // test can never silently drift from the shipped behaviour. No IndexedDB, no network.
 // Run: node scripts/test-geocode.mjs
-import { resolveMatches } from '../src/core/geocode.js';
+import { resolveMatches, assessIndexCoordinate } from '../src/core/geocode.js';
 import { parseAddress } from '../src/core/normalizer.js';
 
 let pass = 0;
@@ -142,6 +142,30 @@ const gartenstr2 = [
   const towns = new Set(res.candidates.map((c) => c.city));
   ok('conflict prompt offers exactly the two plausible towns', towns.size === 2 && towns.has('Demmin') && towns.has('Jarmen'), [...towns].join(','));
   ok('conflict never resolves to the mis-read town', !(res.record && res.record.city === 'Jarmen'));
+}
+
+// --- 13) exact OSM match whose coordinate was moved away from its street cluster ------
+{
+  const base = { street: 'Kastanienallee', postcode: '17109', city: 'Demmin' };
+  const target = { ...base, lookupKey: 'kastanienallee|1', houseNumber: '1', lat: 53.8886524, lng: 13.0496782 };
+  const street = [
+    target,
+    { ...base, lookupKey: 'kastanienallee|2', houseNumber: '2', lat: 53.89160, lng: 13.04096 },
+    { ...base, lookupKey: 'kastanienallee|3', houseNumber: '3', lat: 53.89166, lng: 13.04082 },
+    { ...base, lookupKey: 'kastanienallee|4', houseNumber: '4', lat: 53.89081, lng: 13.04119 },
+    { ...base, lookupKey: 'kastanienallee|5', houseNumber: '5', lat: 53.89195, lng: 13.04025 },
+    { ...base, lookupKey: 'kastanienallee|6', houseNumber: '6', lat: 53.89164, lng: 13.03997 },
+  ];
+  const bad = assessIndexCoordinate(target, street);
+  ok('coordinate outlier: moved Kastanienallee 1 is flagged', bad.suspicious && bad.nearestMeters > 600, JSON.stringify(bad));
+  ok('coordinate outlier: never trusts neighbouring #2 as a replacement', bad.fallbackHouse === '' && bad.coords.lat === target.lat, JSON.stringify(bad));
+
+  const normal = assessIndexCoordinate(street[3], street);
+  ok('coordinate outlier: normal clustered house stays exact', !normal.suspicious && normal.coords.lat === street[3].lat, JSON.stringify(normal));
+
+  // Sparse rural streets do not provide enough evidence for an automatic warning.
+  const sparse = assessIndexCoordinate(target, street.slice(0, 4));
+  ok('coordinate outlier: sparse street is not guessed', !sparse.suspicious, JSON.stringify(sparse));
 }
 
 console.log(`\n${fail === 0 ? '✓ ALL PASS' : '✗ FAILURES'} — ${pass} passed, ${fail} failed`);

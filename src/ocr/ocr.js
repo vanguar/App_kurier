@@ -6,7 +6,7 @@
 //   - page-segmentation mode tuned for a block/column of address lines
 //   - warm the worker up-front so the model download isn't paid mid-scan
 import { createWorker } from 'tesseract.js';
-import { isAddressBlock } from '../core/normalizer.js';
+import { isAddressBlock, isSystemUiLine } from '../core/normalizer.js';
 
 let _worker = null;
 let _initPromise = null;
@@ -170,7 +170,7 @@ export function splitIntoAddressBlocks(text) {
   const lines = text
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+    .filter((l) => l.length > 0 && !isSystemUiLine(l));
 
   const isPostcodeLine = (l) => /\b\d{5}\b/.test(l);
 
@@ -197,7 +197,7 @@ export function splitIntoAddressBlocks(text) {
 // Falls back to postcode-only splitting when no geometry is available.
 export function splitAddresses(text, lines) {
   const positioned = (lines || []).filter(
-    (l) => l && typeof l.top === 'number' && (l.text || '').trim().length,
+    (l) => l && typeof l.top === 'number' && (l.text || '').trim().length && !isSystemUiLine(l.text),
   );
   if (positioned.length < 2) return splitIntoAddressBlocks(text);
 
@@ -268,6 +268,7 @@ function stripTrailingRouteCode(line) {
 function isDeviceNoise(line) {
   const s = line.trim();
   if (!s) return true;
+  if (isSystemUiLine(s)) return true;
   if (ROUTE_CODE_ONLY.test(s)) return true;
   if (DEVICE_CHROME.test(s)) return true;
   if (COUNTER.test(s) && !/[a-zA-ZäöüÄÖÜß]/.test(s.replace(COUNTER, ''))) return true;

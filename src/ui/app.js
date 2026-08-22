@@ -9,6 +9,7 @@ import { geocodeRaw, assessAddress, onlineGeocode, geocodeCenter, setGeoBounds, 
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2, sameScannedPlace } from '../core/matching.js';
 import { computeRoute, orsOptimize, roadTrip, roadRoute } from '../core/route.js';
 import { autoResolveByNeighbors } from '../core/cluster.js';
+import { navigationUrl, pointHasPostalAddress, pointNavOptions } from '../core/navigation.js';
 import { recognize, cloudRecognize, splitAddresses, splitDeviceScreen, pickReceiverBlock, warmUp } from '../ocr/ocr.js';
 
 let settings = null;
@@ -635,6 +636,10 @@ function autoResolveNeighbors() {
       r.canonicalResolved = true;
       r.coords = { lat: c.lat, lng: c.lng };
       r.confidence = 'green';
+      r.coordinateSuspicious = !!c.coordinateSuspicious;
+      r.coordinateDistanceM = c.coordinateDistanceM || 0;
+      r.coordinateFallbackHouse = c.coordinateFallbackHouse || '';
+      if (r.coordinateSuspicious) r.confidence = 'yellow';
       r.candidates = [];
       r.selected = true;
       r.autoResolved = c.city || c.street || ''; // which village won, for a review hint
@@ -666,6 +671,9 @@ async function addManualRow(raw) {
     candidates: g.candidates,
     confidence: g.confidence,
     coords: g.coords,
+    coordinateSuspicious: !!g.coordinateSuspicious,
+    coordinateDistanceM: g.coordinateDistanceM || 0,
+    coordinateFallbackHouse: g.coordinateFallbackHouse || '',
     suggestion: g.suggestion,
     selected: !(g.candidates && g.candidates.length),
   });
@@ -786,6 +794,9 @@ async function renderImport(main) {
         candidates: g.candidates,
         confidence: g.confidence,
         coords: g.coords,
+        coordinateSuspicious: !!g.coordinateSuspicious,
+        coordinateDistanceM: g.coordinateDistanceM || 0,
+        coordinateFallbackHouse: g.coordinateFallbackHouse || '',
         suggestion: g.suggestion,
         // An ambiguous address (several index matches) must NOT be auto-selected — the
         // courier has to pick which town first (see the chooser in renderReview).
@@ -899,6 +910,9 @@ function renderReview() {
       row.candidates = g.candidates;
       row.confidence = g.confidence;
       row.coords = g.coords;
+      row.coordinateSuspicious = !!g.coordinateSuspicious;
+      row.coordinateDistanceM = g.coordinateDistanceM || 0;
+      row.coordinateFallbackHouse = g.coordinateFallbackHouse || '';
       row.suggestion = g.suggestion;
       if (g.candidates && g.candidates.length) row.selected = false;
       render();
@@ -913,6 +927,9 @@ function renderReview() {
       el('div', { class: 'rev-body' }, [
         streetInput,
         confBadge(row.confidence),
+        row.coordinateSuspicious
+          ? el('p', { class: 'warn', text: t('coord_outlier_warning', { m: row.coordinateDistanceM }) })
+          : null,
         row.autoResolved
           ? el('p', { class: 'ok', text: `📍 ${t('import_auto_neighbor')}${row.autoResolved ? ` — ${row.autoResolved}` : ''}` })
           : null,
@@ -928,6 +945,9 @@ function renderReview() {
                 row.canonicalResolved = g.canonicalResolved;
                 row.confidence = g.confidence;
                 row.coords = g.coords; row.suggestion = g.suggestion;
+                row.coordinateSuspicious = !!g.coordinateSuspicious;
+                row.coordinateDistanceM = g.coordinateDistanceM || 0;
+                row.coordinateFallbackHouse = g.coordinateFallbackHouse || '';
                 render();
               },
             })
@@ -950,7 +970,10 @@ function renderReview() {
                   row.canonicalId = cid;
                   row.canonicalResolved = true;
                   row.coords = (typeof c.lat === 'number') ? { lat: c.lat, lng: c.lng } : row.coords;
-                  row.confidence = 'green';
+                  row.coordinateSuspicious = !!c.coordinateSuspicious;
+                  row.coordinateDistanceM = c.coordinateDistanceM || 0;
+                  row.coordinateFallbackHouse = c.coordinateFallbackHouse || '';
+                  row.confidence = row.coordinateSuspicious ? 'yellow' : 'green';
                   row.candidates = [];
                   row.selected = true;
                   render();
@@ -977,7 +1000,15 @@ function renderReview() {
     const itemType = scanItemType(importState.type); // device screen -> parcel items
     for (const r of chosen) {
       const item = makeItem({ type: itemType, source: 'ocr', rawText: r.raw });
-      await addItemAtAddress(r.parsed, item, { coords: r.coords, verified: true, canonicalId: r.canonicalId, canonicalResolved: r.canonicalResolved });
+      await addItemAtAddress(r.parsed, item, {
+        coords: r.coords,
+        verified: true,
+        canonicalId: r.canonicalId,
+        canonicalResolved: r.canonicalResolved,
+        coordinateSuspicious: !!r.coordinateSuspicious,
+        coordinateDistanceM: r.coordinateDistanceM || 0,
+        coordinateFallbackHouse: r.coordinateFallbackHouse || '',
+      });
     }
     toast(t('import_added', { n: chosen.length }));
     importState.rows = [];
@@ -1031,9 +1062,42 @@ function statsBar(points) {
   ]);
 }
 
+function pointNavLabel(point) {
+  const address = point?.address || {};
+  const street = address.display || address.raw || '';
+  const locality = [address.postcode, address.city].filter(Boolean).join(' ').trim();
+  return [street, locality].filter(Boolean).join(', ');
+}
+
+function savePointGps(point) {
+  if (!navigator.geolocation) { toast(t('coord_gps_unsupported')); return; }
+  toast(t('coord_gps_locating'));
+  navigator.geolocation.getCurrentPosition(async (position) => {
+    point.coords = {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+    };
+    point.coordinateManual = true;
+    point.coordinateAccuracyM = Math.round(position.coords.accuracy || 0);
+    point.coordinateSuspicious = false;
+    point.coordinateDistanceM = 0;
+    point.coordinateFallbackHouse = '';
+    point.geocodeStatus = 'manual';
+    await putPoint(point);
+    toast(t('coord_gps_saved'));
+    render();
+  }, () => toast(t('coord_gps_error')), {
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 0,
+  });
+}
+
 function pointCard(p) {
   const counts = itemTypeCounts(p);
   const status = pointStatus(p);
+  const navLabel = pointNavLabel(p);
+  const canNavigate = !!p.coords || pointHasPostalAddress(p);
   const badges = el('div', { class: 'typebadges' },
     Object.entries(counts).filter(([, n]) => n > 0).map(([type, n]) =>
       el('span', { class: `tb ${type}`, text: `${TYPE_EMOJI[type]} ${n}` }),
@@ -1061,17 +1125,31 @@ function pointCard(p) {
     el('div', { class: 'point-head' }, [
       el('div', {}, [
         el('div', {
-          class: 'addr' + (p.coords ? ' addr-nav' : ''),
-          text: (p.coords ? '🧭 ' : '') + (p.address.display || p.address.raw),
-          onclick: p.coords ? () => openNav(p.coords, p.address.display || p.address.raw) : null,
+          class: 'addr' + (canNavigate ? ' addr-nav' : ''),
+          text: (canNavigate ? '🧭 ' : '') + (p.address.display || p.address.raw),
+          onclick: canNavigate ? () => openNav(p.coords || { lat: 0, lng: 0 }, navLabel, pointNavOptions(p)) : null,
         }),
         p.address.city ? el('div', { class: 'city', text: `${p.address.postcode} ${p.address.city}`.trim() }) : null,
+        p.coordinateManual
+          ? el('div', { class: 'ok', text: '✓ ' + t('coord_gps_manual', { m: p.coordinateAccuracyM || '?' }) })
+          : null,
+        p.coordinateSuspicious
+          ? el('div', { class: 'nocoord', text: '⚠ ' + t('coord_outlier_warning', { m: p.coordinateDistanceM || '?' }) })
+          : null,
+        p.coords && !p.coordinateManual && !p.coordinateSuspicious
+          ? el('div', { class: 'hint', text: t('coord_auto_unverified') })
+          : null,
         !p.coords ? el('div', { class: 'nocoord', text: '⚠ ' + t('conf_yellow') }) : null,
       ]),
       badges,
     ]),
     items,
     addWrap,
+    el('button', {
+      class: 'btn sm',
+      text: '📍 ' + t(p.coordinateManual ? 'coord_gps_update' : 'coord_gps_save'),
+      onclick: () => savePointGps(p),
+    }),
     el('button', {
       class: 'btn danger sm', text: t('point_delete'),
       onclick: async () => {
@@ -1286,13 +1364,6 @@ async function renderRoute(main) {
 }
 
 // ---------- navigation to a stop ----------
-const NAV_URLS = {
-  google: ({ lat, lng }) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`,
-  waze: ({ lat, lng }) => `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`,
-  geo: ({ lat, lng }, label) => `geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(label || '')})`,
-  apple: ({ lat, lng }) => `https://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`,
-};
-
 function openUrl(url) {
   const a = el('a', { href: url, target: '_blank', rel: 'noopener' });
   document.body.appendChild(a);
@@ -1301,21 +1372,21 @@ function openUrl(url) {
 }
 
 // Open a stop: use the preferred navigator, or show a chooser sheet when 'ask'.
-function openNav(coords, label) {
+function openNav(coords, label, options = {}) {
   const pref = settings.navigator || 'ask';
-  if (pref !== 'ask' && NAV_URLS[pref]) {
-    openUrl(NAV_URLS[pref](coords, label));
+  if (pref !== 'ask') {
+    openUrl(navigationUrl(pref, coords, label, options));
     return;
   }
-  navSheet(coords, label);
+  navSheet(coords, label, options);
 }
 
-function navSheet(coords, label) {
+function navSheet(coords, label, options = {}) {
   const overlay = el('div', {
     class: 'sheet-overlay',
     onclick: (e) => { if (e.target === overlay) overlay.remove(); },
   });
-  const choose = (key) => { overlay.remove(); openUrl(NAV_URLS[key](coords, label)); };
+  const choose = (key) => { overlay.remove(); openUrl(navigationUrl(key, coords, label, options)); };
   const opt = (icon, text, key) =>
     el('button', { class: 'sheet-opt', onclick: () => choose(key) }, [
       el('span', { class: 'so-ico', text: icon }),
@@ -1364,15 +1435,16 @@ function renderRouteResult(result, points, orderedIds, totalMeters, skipped, pro
 // but stay tappable, in case the courier needs to go back for something forgotten.
 function stopButton(p, indexLabel) {
   const label = p.address.display || p.address.raw;
+  const navLabel = pointNavLabel(p);
   const done = pointStatus(p) === 'done';
   const labels = TYPE_LABELS();
 
   const head = el('button', {
-    class: 'stop-head', onclick: () => openNav(p.coords, label),
+    class: 'stop-head', onclick: () => openNav(p.coords, navLabel, pointNavOptions(p)),
   }, [
     el('span', { class: 'stop-n', text: done ? '✓' : indexLabel }),
     el('div', { class: 'stop-body' }, [
-      el('div', { class: 'stop-addr', text: label }),
+      el('div', { class: 'stop-addr', text: (p.coordinateSuspicious ? '⚠ ' : '') + label }),
       p.address.city
         ? el('div', { class: 'stop-city', text: `${p.address.postcode} ${p.address.city}`.trim() })
         : null,
