@@ -1046,7 +1046,9 @@ function renderReview() {
     wrap.appendChild(rowEl);
   });
 
-  const addBtn = el('button', { class: 'btn primary big', id: 'add-selected' });
+  // Distinct colour (green = confirm) so it is never confused with the blue pinned
+  // "Take photo" action that sits just below it.
+  const addBtn = el('button', { class: 'btn big commit', id: 'add-selected' });
   const updateAddBtn = () => {
     const n = importState.rows.filter((r) => r.selected).length;
     addBtn.textContent = t('import_add_selected', { n });

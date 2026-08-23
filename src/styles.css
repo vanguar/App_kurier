@@ -203,6 +203,13 @@ body {
 .btn.primary:active { filter: brightness(.96); }
 .btn.danger { background: transparent; color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--line)); }
 .btn.big { padding: 15px; font-size: 17px; }
+/* confirm action (e.g. "Add selected") — green, to stand apart from the blue primary */
+.btn.commit {
+  background: var(--green); color: #fff; border-color: transparent;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--green) 30%, transparent);
+}
+.btn.commit:active { filter: brightness(.96); }
+.btn.commit:disabled { opacity: .5; box-shadow: none; }
 .btn:disabled { opacity: .5; box-shadow: none; transform: none; }
 .btn.install { background: linear-gradient(135deg, #1c8a41, #157233); color: #fff; border-color: transparent; box-shadow: 0 6px 16px rgba(21,114,51,.32); }
 
