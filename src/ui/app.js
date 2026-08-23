@@ -1,4 +1,5 @@
 import { el, clear, toast } from './dom.js';
+import { icon } from './icons.js';
 import { t, setLang, getLang, resolveInitialLang, LANGS } from '../i18n/index.js';
 import {
   getSettings, saveSettings, getPoints, putPoint, deletePoint, clearPoints,
@@ -27,7 +28,7 @@ function applyTheme(theme) {
   const resolved = resolveTheme(theme);
   document.documentElement.dataset.theme = resolved;
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = resolved === 'dark' ? '#0f1319' : '#0b5cff';
+  if (meta) meta.content = resolved === 'dark' ? '#0f1319' : '#2f5bd6';
 }
 
 // ---------- install (Add to Home Screen) ----------
@@ -207,6 +208,8 @@ const TYPE_LABELS = () => ({
   letter: t('type_letter'),
 });
 const TYPE_EMOJI = { parcel: '📦', magazine: '📖', letter: '✉️' };
+// Lucide equivalents of the type emoji, for the redesigned Points screen (one line-icon set).
+const TYPE_ICON = { parcel: 'package', magazine: 'book-open', letter: 'mail' };
 
 // Scan MODES for the import selector. These are extraction modes, not item types:
 // `device` (courier-device screen) still produces PARCEL items, just parsed differently.
@@ -219,7 +222,6 @@ const SCAN_LABELS = () => ({
   magazine: t('type_magazine'),
   letter: t('type_letter'),
 });
-const SCAN_EMOJI = { parcel: '📦', device: '📱', magazine: '📖', letter: '✉️' };
 // The delivered-item type a scan mode yields (device screen = a list of parcels).
 const scanItemType = (mode) => (mode === 'device' ? 'parcel' : mode);
 
@@ -239,23 +241,30 @@ function render() {
 }
 
 function header() {
+  // App bar shows the brand on most screens; the Scan screen puts its own title here (the
+  // in-content heading is dropped there), matching the mobile redesign.
+  const route = (location.hash || '#/points').slice(2);
+  const title = route === 'import' ? t('import_title') : t('app_title');
   return el('header', { class: 'appbar' }, [
-    el('span', { class: 'brand', text: t('app_title') }),
+    el('div', { class: 'appbar-brand' }, [
+      el('span', { class: 'appbar-mark' }),
+      el('span', { class: 'brand', text: title }),
+    ]),
     el('span', { class: 'lang', text: getLang().toUpperCase() }),
   ]);
 }
 
 function nav(active) {
-  const item = (hash, key, icon) =>
+  const item = (hash, key, iconName) =>
     el('a', { href: `#/${hash}`, class: 'navitem' + (active === hash ? ' on' : '') }, [
-      el('span', { class: 'ico', text: icon }),
+      el('span', { class: 'ico' }, [icon(iconName, { size: 22 })]),
       el('span', { class: 'lbl', text: t(key) }),
     ]);
   return el('nav', { class: 'bottomnav' }, [
-    item('import', 'nav_import', '📷'),
-    item('points', 'nav_points', '📍'),
-    item('route', 'nav_route', '🧭'),
-    item('settings', 'nav_settings', '⚙️'),
+    item('import', 'nav_import', 'camera'),
+    item('points', 'nav_points', 'map-pin'),
+    item('route', 'nav_route', 'compass'),
+    item('settings', 'nav_settings', 'settings'),
   ]);
 }
 
@@ -592,6 +601,8 @@ async function renderSettings(main) {
 
 // ---------- Import / Scan ----------
 let importState = { type: 'parcel', rows: [] };
+// Local-only UI flags: whether each "?" explanation panel is expanded. Not persisted.
+let importHints = { cargo: false, ocr: false };
 
 // Identity fields used to spot the SAME delivery scanned twice across overlapping photos
 // (see sameScannedPlace). lookupKey is the anchor that survives auto-resolution.
@@ -700,7 +711,8 @@ function startVoice(targetInput, onEnd) {
 }
 
 async function renderImport(main) {
-  main.appendChild(section(t('import_title')));
+  // Title lives in the app bar on this screen; the pinned "Take photo" button needs room.
+  main.classList.add('is-import');
 
   const useCloud = (settings.ocrEngine || 'cloud') === 'cloud';
 
@@ -716,20 +728,31 @@ async function renderImport(main) {
     });
   }
 
-  // Type selector
-  const typeSel = el('div', { class: 'card' }, [
-    el('label', { class: 'field-label', text: t('import_type_label') }),
-    el('div', { class: 'langgrid' },
+  // Type selector — 2x2 radio grid. Same values as before (importState.type); the long
+  // note is unchanged text, just tucked behind "?" instead of always filling the card.
+  const typeCard = el('div', { class: 'card' }, [
+    el('div', { class: 'card-head' }, [
+      el('div', { class: 'card-title', text: t('import_type_label') }),
+      el('button', {
+        class: 'hintbtn', type: 'button', 'aria-label': '?',
+        onclick: () => { importHints.cargo = !importHints.cargo; render(); },
+      }, '?'),
+    ]),
+    el('div', { class: 'typegrid' },
       Object.entries(SCAN_LABELS()).map(([k, label]) =>
         el('button', {
-          class: 'chip' + (importState.type === k ? ' on' : ''),
+          class: 'typecell' + (importState.type === k ? ' on' : ''),
+          type: 'button',
           onclick: () => { importState.type = k; render(); },
-        }, `${SCAN_EMOJI[k]} ${label}`),
+        }, [
+          el('span', { class: 'radio' }),
+          el('span', { class: 'typecell-label', text: label }),
+        ]),
       ),
     ),
-    el('p', { class: 'hint', text: t('scan_note') }),
+    importHints.cargo ? el('p', { class: 'hintpanel', text: t('scan_note') }) : null,
   ]);
-  main.appendChild(typeSel);
+  main.appendChild(typeCard);
 
   const isDevice = importState.type === 'device';
   const isList = importState.type === 'parcel' || isDevice; // both are multi-address lists
@@ -815,32 +838,16 @@ async function renderImport(main) {
   cameraInput.addEventListener('change', () => { const f = cameraInput.files[0]; cameraInput.value = ''; handleFile(f); });
   fileInput.addEventListener('change', () => { const f = fileInput.files[0]; fileInput.value = ''; handleFile(f); });
 
-  const photoCard = el('div', { class: 'card' }, [
-    instruction,
-    el('div', { class: 'btnrow' }, [
-      el('button', { class: 'btn primary', text: '📷 ' + t('import_take_photo_btn'), onclick: () => cameraInput.click() }),
-      el('button', { class: 'btn', text: '🖼️ ' + t('import_pick_file_btn'), onclick: () => fileInput.click() }),
-    ]),
-    cameraInput,
-    fileInput,
-    progress,
-    importState.rows.length
-      ? el('button', {
-          class: 'btn danger sm', text: t('import_clear'),
-          onclick: () => { importState.rows = []; render(); },
-        })
-      : null,
-  ]);
-
-  // One-time informed consent before any photo can be sent to the cloud OCR. Until the
-  // user chooses, the photo buttons are hidden — nothing leaves the device unasked.
+  // Recognition mode. The one-time consent gate is kept: until the courier picks a mode,
+  // photo capture stays hidden so nothing leaves the device unasked. After consent, the same
+  // choice becomes a persistent segment control writing the same settings.ocrEngine.
   if (settings.ocrConsent == null) {
     const choose = async (engine) => {
       settings = await saveSettings({ ocrConsent: true, ocrEngine: engine });
       render();
     };
     main.appendChild(el('div', { class: 'card' }, [
-      el('h3', { class: 'field-label', text: t('ocr_consent_title') }),
+      el('h3', { class: 'card-title', text: t('ocr_consent_title') }),
       el('p', { class: 'hint', text: t('ocr_consent_body') }),
       el('div', { class: 'btnrow' }, [
         el('button', { class: 'btn primary', text: t('ocr_consent_cloud'), onclick: () => choose('cloud') }),
@@ -848,7 +855,37 @@ async function renderImport(main) {
       ]),
     ]));
   } else {
-    main.appendChild(photoCard);
+    const engine = settings.ocrEngine || 'cloud';
+    main.appendChild(el('div', { class: 'card' }, [
+      el('div', { class: 'card-head' }, [
+        el('div', { class: 'card-title', text: t('ocr_consent_title') }),
+        el('button', {
+          class: 'hintbtn', type: 'button', 'aria-label': '?',
+          onclick: () => { importHints.ocr = !importHints.ocr; render(); },
+        }, '?'),
+      ]),
+      el('div', { class: 'segmented' }, [
+        el('button', {
+          class: 'seg' + (engine === 'cloud' ? ' on' : ''), type: 'button',
+          onclick: async () => { settings = await saveSettings({ ocrEngine: 'cloud' }); render(); },
+        }, t('ocr_cloud')),
+        el('button', {
+          class: 'seg' + (engine === 'device' ? ' on' : ''), type: 'button',
+          onclick: async () => { settings = await saveSettings({ ocrEngine: 'device' }); render(); },
+        }, t('ocr_device')),
+      ]),
+      importHints.ocr ? el('p', { class: 'hintpanel', text: t('ocr_consent_body') }) : null,
+    ]));
+
+    // Photo help: the screenshot/gallery alternative + the per-type instruction. The primary
+    // camera action is the pinned "Take photo" button at the bottom.
+    main.appendChild(el('div', { class: 'card' }, [
+      instruction,
+      el('button', {
+        class: 'btn', type: 'button', onclick: () => fileInput.click(),
+      }, [icon('image', { size: 18 }), el('span', { text: t('import_pick_file_btn') })]),
+      fileInput,
+    ]));
   }
 
   // Manual / voice entry
@@ -857,24 +894,29 @@ async function renderImport(main) {
     placeholder: t('import_manual_placeholder'),
     autocapitalize: 'words', autocomplete: 'off',
   });
-  const micBtn = el('button', { class: 'btn' });
+  const micBtn = el('button', { class: 'btn micbtn', type: 'button' }, [icon('mic', { size: 20 })]);
   const setMic = (listening) => {
-    micBtn.textContent = listening ? '🔴 ' + t('voice_listening') : '🎤 ' + t('voice_start');
+    micBtn.classList.toggle('listening', listening);
     micBtn.disabled = listening;
+    const label = listening ? t('voice_listening') : t('voice_start');
+    micBtn.setAttribute('aria-label', label);
+    micBtn.title = label;
   };
   setMic(false);
   micBtn.addEventListener('click', () => {
     setMic(true);
     startVoice(manualInput, () => setMic(false));
   });
+  // "Добавить" is intentionally soft-blue, not solid: the one solid action per screen is
+  // the pinned "Take photo" button.
   const manualCard = el('div', { class: 'card' }, [
-    el('label', { class: 'field-label', text: t('import_manual_title') }),
+    el('div', { class: 'card-title', text: t('import_manual_title') }),
     el('p', { class: 'hint', text: t('import_manual_hint') }),
     manualInput,
-    el('div', { class: 'btnrow' }, [
+    el('div', { class: 'manual-row' }, [
       micBtn,
       el('button', {
-        class: 'btn primary', text: t('import_manual_add'),
+        class: 'btn addbtn', type: 'button', text: t('import_manual_add'),
         onclick: async () => { await addManualRow(manualInput.value); },
       }),
     ]),
@@ -882,6 +924,18 @@ async function renderImport(main) {
   main.appendChild(manualCard);
 
   if (importState.rows.length) main.appendChild(renderReview());
+
+  // Pinned primary action (only once photo capture is unlocked by consent). The camera input
+  // and OCR status line live here so the same #ocr-status hook stays in the DOM during a scan.
+  if (settings.ocrConsent != null) {
+    main.appendChild(el('div', { class: 'import-actions' }, [
+      cameraInput,
+      progress,
+      el('button', {
+        class: 'btn primary big', type: 'button', onclick: () => cameraInput.click(),
+      }, [icon('camera', { size: 18 }), el('span', { text: t('import_take_photo_btn') })]),
+    ]));
+  }
 }
 
 function confBadge(conf) {
@@ -891,7 +945,13 @@ function confBadge(conf) {
 
 function renderReview() {
   const wrap = el('div', { class: 'card' }, [
-    el('h3', { class: 'field-label', text: t('import_review_title') }),
+    el('div', { class: 'card-head' }, [
+      el('h3', { class: 'card-title', text: t('import_review_title') }),
+      el('button', {
+        class: 'btn danger sm', type: 'button', text: t('import_clear'),
+        onclick: () => { importState.rows = []; render(); },
+      }),
+    ]),
     el('p', { class: 'hint', text: t('import_review_hint') }),
   ]);
 
@@ -1022,10 +1082,11 @@ function renderReview() {
 // ---------- Points ----------
 async function renderPoints(main) {
   const points = await getPoints();
-  main.appendChild(section(t('points_title')));
+  // The "ТОЧКИ ДОСТАВКИ" heading is gone — it only duplicated the active tab.
   main.appendChild(statsBar(points));
   if (!points.length) {
-    main.appendChild(el('p', { class: 'empty', text: t('points_empty') }));
+    main.classList.add('is-points'); // column layout: counters top, empty centered, actions bottom
+    main.appendChild(emptyPoints());
     return;
   }
   main.appendChild(el('div', { class: 'points-actions' }, [
@@ -1047,18 +1108,44 @@ async function renderPoints(main) {
 
 function statsBar(points) {
   const c = aggregateCounts(points);
-  const cell = (icon, label, value, cls) =>
+  // One segmented card. Colour now carries meaning only in a small marker dot before the
+  // label (parcels blue, mail amber); the total gets no dot. Number is bigger than label.
+  const cell = (label, value, cls, dot) =>
     el('div', { class: `stat ${cls || ''}` }, [
-      el('div', { class: 'stat-ico', text: icon }),
       el('div', { class: 'stat-val', text: String(value) }),
-      el('div', { class: 'stat-lbl', text: label }),
+      el('div', { class: 'stat-lbl' }, [
+        dot ? el('span', { class: 'stat-dot' }) : null,
+        el('span', { text: label }),
+      ]),
     ]);
   return el('div', { class: 'card statsbar' }, [
-    cell('📦', t('type_parcel'), c.parcel, 'parcel'),
-    cell('📖✉️', t('stat_mail'), c.mail, 'mail'),
+    cell(t('type_parcel'), c.parcel, 'parcel', true),
+    el('div', { class: 'stat-div' }),
+    cell(t('stat_mail'), c.mail, 'mail', true),
+    el('div', { class: 'stat-div' }),
     // Headline = number of delivery POINTS in the list (stops), not the item count, so it
     // always matches the rows the courier sees.
-    cell('📍', t('stat_total'), c.stops, 'total'),
+    cell(t('stat_total'), c.stops, 'total', false),
+  ]);
+}
+
+// Empty Points screen: a soft placeholder icon, the existing empty message, and the two
+// primary entry points. Both buttons just navigate to the Scan screen (route only, no new
+// logic): the first for the photo flow, the second for the manual/dictate entry card.
+function emptyPoints() {
+  return el('div', { class: 'points-empty' }, [
+    el('div', { class: 'points-empty-art' }, [
+      el('div', { class: 'points-empty-badge' }, [el('span', { class: 'points-empty-dot' })]),
+      el('p', { class: 'points-empty-text', text: t('points_empty') }),
+    ]),
+    el('div', { class: 'points-empty-actions' }, [
+      el('button', {
+        class: 'btn primary big', onclick: () => { location.hash = '#/import'; },
+      }, [icon('camera', { size: 18 }), el('span', { text: t('points_empty_scan') })]),
+      el('button', {
+        class: 'btn', onclick: () => { location.hash = '#/import'; },
+      }, [el('span', { text: t('points_empty_manual') })]),
+    ]),
   ]);
 }
 
@@ -1100,7 +1187,10 @@ function pointCard(p) {
   const canNavigate = !!p.coords || pointHasPostalAddress(p);
   const badges = el('div', { class: 'typebadges' },
     Object.entries(counts).filter(([, n]) => n > 0).map(([type, n]) =>
-      el('span', { class: `tb ${type}`, text: `${TYPE_EMOJI[type]} ${n}` }),
+      el('span', { class: `tb ${type}` }, [
+        icon(TYPE_ICON[type], { size: 15 }),
+        el('span', { text: String(n) }),
+      ]),
     ),
   );
 
@@ -1117,7 +1207,7 @@ function pointCard(p) {
           await putPoint(p);
           render();
         },
-      }, `+ ${TYPE_EMOJI[type]} ${label}`),
+      }, [icon('plus', { size: 15 }), icon(TYPE_ICON[type], { size: 15 }), el('span', { text: label })]),
     ),
   );
 
@@ -1126,9 +1216,11 @@ function pointCard(p) {
       el('div', {}, [
         el('div', {
           class: 'addr' + (canNavigate ? ' addr-nav' : ''),
-          text: (canNavigate ? '🧭 ' : '') + (p.address.display || p.address.raw),
           onclick: canNavigate ? () => openNav(p.coords || { lat: 0, lng: 0 }, navLabel, pointNavOptions(p)) : null,
-        }),
+        }, [
+          canNavigate ? icon('navigation', { size: 16 }) : null,
+          el('span', { text: p.address.display || p.address.raw }),
+        ]),
         p.address.city ? el('div', { class: 'city', text: `${p.address.postcode} ${p.address.city}`.trim() }) : null,
         p.coordinateManual
           ? el('div', { class: 'ok', text: '✓ ' + t('coord_gps_manual', { m: p.coordinateAccuracyM || '?' }) })
@@ -1147,9 +1239,8 @@ function pointCard(p) {
     addWrap,
     el('button', {
       class: 'btn sm',
-      text: '📍 ' + t(p.coordinateManual ? 'coord_gps_update' : 'coord_gps_save'),
       onclick: () => savePointGps(p),
-    }),
+    }, [icon('map-pin', { size: 16 }), el('span', { text: t(p.coordinateManual ? 'coord_gps_update' : 'coord_gps_save') })]),
     el('button', {
       class: 'btn danger sm', text: t('point_delete'),
       onclick: async () => {
@@ -1171,7 +1262,10 @@ function itemRow(p, it) {
   });
   return el('label', { class: `itemrow ${it.type}` + (done ? ' done' : '') }, [
     cb,
-    el('span', { class: 'it-type', text: `${TYPE_EMOJI[it.type]} ${TYPE_LABELS()[it.type]}` }),
+    el('span', { class: 'it-type' }, [
+      icon(TYPE_ICON[it.type], { size: 16 }),
+      el('span', { text: TYPE_LABELS()[it.type] }),
+    ]),
     done ? el('span', { class: 'it-done', text: t('point_delivered') }) : null,
   ]);
 }

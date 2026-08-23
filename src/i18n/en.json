@@ -84,6 +84,8 @@
   "scan_note": "\"Parcel (standard address)\" and \"Parcel (device)\" are the SAME thing: parcels. They differ only in where the photo comes from — a normal address list or the courier device screen.",
   "points_title": "Delivery stops",
   "points_empty": "No stops yet. Scan some addresses.",
+  "points_empty_scan": "Scan addresses",
+  "points_empty_manual": "Enter address manually or dictate",
   "points_count": "Stops: {n}",
   "stat_mail": "Magazines+letters",
   "stat_total": "Total",

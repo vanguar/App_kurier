@@ -84,6 +84,8 @@
   "scan_note": "„Paket (Standardadresse)“ und „Paket (Gerät)“ sind DASSELBE: Pakete. Der Unterschied ist nur, woher das Foto stammt — eine normale Adressliste oder der Bildschirm des Kurier-Geräts.",
   "points_title": "Lieferstopps",
   "points_empty": "Noch keine Stopps. Adressen scannen.",
+  "points_empty_scan": "Adressen scannen",
+  "points_empty_manual": "Adresse manuell eingeben oder diktieren",
   "points_count": "Stopps: {n}",
   "stat_mail": "Zeitschriften+Briefe",
   "stat_total": "Gesamt",

@@ -13,3 +13,7 @@ dist/
 # Generated OSM address index (large, per-district, not versioned)
 /overpass*.json
 /public-index*.json
+
+# Design handoff reference (not part of the app source)
+/_design_extract/
+/*.zip

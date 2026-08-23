@@ -84,6 +84,8 @@
   "scan_note": "„Paczka (adres standardowy)” i „Paczka (urządzenie)” to TO SAMO: paczki. Różnica polega tylko na tym, skąd pochodzi zdjęcie — zwykła lista adresów albo ekran urządzenia kuriera.",
   "points_title": "Punkty dostawy",
   "points_empty": "Brak punktów. Zeskanuj adresy.",
+  "points_empty_scan": "Skanuj adresy",
+  "points_empty_manual": "Wpisz adres ręcznie lub podyktuj",
   "points_count": "Punkty: {n}",
   "stat_mail": "Czasopisma+listy",
   "stat_total": "Razem",
