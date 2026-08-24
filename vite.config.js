@@ -23,6 +23,14 @@ export default defineConfig({
   // service worker scope and PWA manifest resolve correctly. If you rename the repo,
   // update this to match "/<new-repo-name>/".
   base: '/App_kurier/',
+  build: {
+    // Couriers run this on cheap/old Android phones whose System WebView can lag years
+    // behind. Target old engines so esbuild keeps JS/CSS syntax they understand and adds
+    // needed prefixes. NOTE: esbuild does NOT polyfill color-mix()/newer CSS functions —
+    // avoid them in styles.css (values there are precomputed for exactly this reason).
+    target: ['es2019', 'chrome80', 'safari13'],
+    cssTarget: ['chrome80', 'safari13'],
+  },
   plugins: [
     emitVersion(),
     VitePWA({

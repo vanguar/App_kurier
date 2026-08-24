@@ -46,14 +46,18 @@
 
   /* brand accent gradient (used on appbar + primary actions) */
   --brand-grad: linear-gradient(135deg, #2f7bff 0%, #0b5cff 55%, #0a4fe0 100%);
-  --brand-soft: color-mix(in srgb, var(--brand) 10%, var(--card));
+  /* Static values (no color-mix): color-mix needs Chrome/WebView 111+; older Android
+     WebView drops the whole declaration, so all tints are precomputed here instead. */
+  --brand-soft: #eaeffb;             /* brand 10% over --card */
+  --danger-border: rgba(192, 57, 43, .5);   /* subtle red border */
+  --radio-ring: #ddd9d2;             /* neutral radio/dash ring */
 
   /* elevation — layered, soft, tuned for a light UI */
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05), 0 1px 3px rgba(16, 24, 40, .04);
   --shadow: 0 2px 6px rgba(16, 24, 40, .06), 0 8px 24px rgba(16, 24, 40, .06);
   --shadow-lg: 0 10px 30px rgba(16, 24, 40, .12);
-  --shadow-brand: 0 6px 16px color-mix(in srgb, var(--brand) 32%, transparent);
-  --ring: color-mix(in srgb, var(--brand) 32%, transparent);
+  --shadow-brand: 0 6px 16px rgba(47, 91, 214, .32);  /* brand 32% */
+  --ring: rgba(47, 91, 214, .32);                     /* brand 32% */
 }
 
 :root[data-theme='dark'] {
@@ -96,14 +100,16 @@
   --type-letter: #4ade80;
 
   --brand-grad: linear-gradient(135deg, #2a4c86 0%, #1e3a6e 60%, #16305c 100%);
-  --brand-soft: color-mix(in srgb, var(--brand) 16%, var(--card));
+  --brand-soft: #29364d;             /* brand 16% over --card */
+  --danger-border: rgba(255, 122, 107, .5);
+  --radio-ring: #34404f;
 
   /* deeper, darker shadows read better on a dark surface */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35);
   --shadow: 0 2px 8px rgba(0, 0, 0, .38), 0 10px 28px rgba(0, 0, 0, .30);
   --shadow-lg: 0 14px 36px rgba(0, 0, 0, .5);
   --shadow-brand: 0 6px 18px rgba(0, 0, 0, .45);
-  --ring: color-mix(in srgb, var(--brand) 45%, transparent);
+  --ring: rgba(122, 165, 255, .45);  /* brand 45% */
 }
 
 /* ---------- Base ---------- */
@@ -124,7 +130,7 @@ body {
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; justify-content: space-between;
   min-height: 52px; padding: 0 16px;
-  padding-top: env(safe-area-inset-top);
+  padding-top: env(safe-area-inset-top, 0px);
   background: var(--brand-btn); color: var(--brand-ink);
 }
 .appbar-brand { display: inline-flex; align-items: center; gap: 10px; }
@@ -145,8 +151,8 @@ body {
 .content {
   flex: 1; width: 100%; max-width: 640px; margin: 0 auto;
   padding: 12px 12px 96px;
-  padding-left: max(12px, env(safe-area-inset-left));
-  padding-right: max(12px, env(safe-area-inset-right));
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
 }
 .sec {
   font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
@@ -158,7 +164,7 @@ body {
   border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
   box-shadow: var(--shadow-sm);
 }
-.card.danger { border-color: color-mix(in srgb, var(--red) 45%, var(--line)); }
+.card.danger { border-color: var(--danger-border); }
 
 .field-label { display: block; font-weight: 600; margin-bottom: 6px; color: var(--ink); }
 .hint { color: var(--muted); font-size: 14px; margin: 4px 0; }
@@ -201,12 +207,12 @@ body {
   box-shadow: var(--shadow-brand);
 }
 .btn.primary:active { filter: brightness(.96); }
-.btn.danger { background: transparent; color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--line)); }
+.btn.danger { background: transparent; color: var(--red); border-color: var(--danger-border); }
 .btn.big { padding: 15px; font-size: 17px; }
 /* confirm action (e.g. "Add selected") — green, to stand apart from the blue primary */
 .btn.commit {
   background: var(--green); color: #fff; border-color: transparent;
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--green) 30%, transparent);
+  box-shadow: 0 6px 16px rgba(26, 127, 60, .3);
 }
 .btn.commit:active { filter: brightness(.96); }
 .btn.commit:disabled { opacity: .5; box-shadow: none; }
@@ -232,7 +238,7 @@ body {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
   display: flex; background: var(--card);
   border-top: 1px solid var(--line);
-  padding-top: 9px; padding-bottom: env(safe-area-inset-bottom);
+  padding-top: 9px; padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .navitem {
   flex: 1; text-align: center; padding: 0 0 6px; text-decoration: none;
@@ -252,7 +258,7 @@ body {
 .onboard {
   min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column;
   justify-content: center; max-width: 480px; margin: 0 auto;
-  padding: 28px 22px calc(28px + env(safe-area-inset-bottom));
+  padding: 28px 22px calc(28px + env(safe-area-inset-bottom, 0px));
 }
 .onb-logo { font-size: 52px; text-align: center; margin-bottom: 8px; }
 .onb-title { font-size: 26px; text-align: center; margin: 4px 0 10px; color: var(--ink); }
@@ -281,9 +287,9 @@ body {
   border: 1px solid var(--line); border-left: 4px solid transparent;
   border-radius: var(--radius-sm);
 }
-.review-row.green { border-left-color: var(--green); background: var(--green-bg); border-color: color-mix(in srgb, var(--green) 25%, var(--line)); }
-.review-row.yellow { border-left-color: var(--yellow); background: var(--yellow-bg); border-color: color-mix(in srgb, var(--yellow) 25%, var(--line)); }
-.review-row.red { border-left-color: var(--red); background: var(--red-bg); border-color: color-mix(in srgb, var(--red) 25%, var(--line)); }
+.review-row.green { border-left-color: var(--green); background: var(--green-bg); border-color: rgba(26, 127, 60, .35); }
+.review-row.yellow { border-left-color: var(--yellow); background: var(--yellow-bg); border-color: rgba(130, 89, 0, .35); }
+.review-row.red { border-left-color: var(--red); background: var(--red-bg); border-color: rgba(192, 57, 43, .35); }
 .rev-check input { width: 24px; height: 24px; accent-color: var(--brand); }
 .rev-body { flex: 1; min-width: 0; }
 /* Tint background + strong-color text: readable in both light and dark themes. */
@@ -303,7 +309,7 @@ body {
 }
 .points-empty-badge {
   width: 64px; height: 64px; border-radius: 20px; display: flex; align-items: center; justify-content: center;
-  border: 1.5px dashed color-mix(in srgb, var(--muted) 45%, var(--line)); margin-bottom: 6px;
+  border: 1.5px dashed var(--radio-ring); margin-bottom: 6px;
 }
 .points-empty-dot { width: 16px; height: 16px; border: 2px solid var(--muted); border-radius: 999px; }
 .points-empty-text { font-size: 15px; line-height: 1.45; color: var(--muted); text-align: center; text-wrap: pretty; margin: 0; }
@@ -346,7 +352,7 @@ body {
 .points-actions .btn.sm { flex: 0 0 auto; width: auto; }
 
 /* ---------- Scan / Import ---------- */
-.content.is-import { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+.content.is-import { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
 
 /* card header with a "?" toggle */
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
@@ -375,7 +381,7 @@ body {
 }
 .typecell .radio {
   width: 16px; height: 16px; flex: none; position: relative;
-  border-radius: var(--radius-pill); border: 1.5px solid color-mix(in srgb, var(--muted) 45%, var(--line));
+  border-radius: var(--radius-pill); border: 1.5px solid var(--radio-ring);
 }
 .typecell.on { border: 1.5px solid var(--brand); background: var(--sel-bg); color: var(--sel-ink); }
 .typecell.on .radio { border-color: var(--brand); background: var(--brand); }
@@ -399,7 +405,7 @@ body {
 /* manual entry: square mic + soft-blue Add */
 .manual-row { display: flex; gap: 8px; margin-top: 8px; }
 .manual-row .micbtn { flex: none; width: 48px; min-height: 46px; padding: 0; margin-top: 0; color: var(--ink); }
-.manual-row .micbtn.listening { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--line)); }
+.manual-row .micbtn.listening { color: var(--red); border-color: var(--danger-border); }
 .manual-row .addbtn {
   flex: 1; margin-top: 0; box-shadow: none;
   background: var(--sel-bg); border-color: var(--sel-border); color: var(--sel-ink);
@@ -409,7 +415,7 @@ body {
 /* pinned primary action with a fade so content scrolls under it */
 .import-actions {
   position: fixed; left: 0; right: 0; z-index: 9;
-  bottom: calc(56px + env(safe-area-inset-bottom));
+  bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   max-width: 640px; margin: 0 auto; padding: 12px 16px 14px;
   display: flex; flex-direction: column; gap: 6px; pointer-events: none;
   background: linear-gradient(to top, var(--bg) 55%, transparent);
@@ -428,7 +434,7 @@ body {
 .stop.base {
   display: flex; align-items: center; justify-content: center;
   background: var(--tint-base); font-weight: 700; letter-spacing: .01em;
-  border-color: color-mix(in srgb, var(--brand) 20%, var(--line));
+  border-color: var(--sel-border);
 }
 .stop-head {
   display: flex; align-items: center; gap: 10px; width: 100%;
@@ -470,12 +476,12 @@ body {
 
 /* navigator chooser sheet */
 .sheet-overlay {
-  position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.45);
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 200; background: rgba(0,0,0,.45);
   display: flex; align-items: flex-end; justify-content: center;
 }
 .sheet {
   width: 100%; max-width: 480px; background: var(--card); color: var(--ink);
-  border-radius: 22px 22px 0 0; padding: 8px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 22px 22px 0 0; padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
   box-shadow: var(--shadow-lg);
   animation: sheet-up .22s cubic-bezier(.2, .8, .2, 1);
 }
