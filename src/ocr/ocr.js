@@ -112,8 +112,17 @@ async function downscaleToBlob(file, maxDim = 1600, quality = 0.7) {
 // Get a free key at https://ocr.space/ocrapi/freekey
 // Returns { text, lines } — lines carry vertical position (MinTop/MaxHeight from
 // the text overlay) so a parcel list can be split on visual gaps, not just PLZ.
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
 export async function cloudRecognize(file, apiKey) {
   const blob = await downscaleToBlob(file);
+  return postToOcrSpace(blob, apiKey, 1); // one retry for transient failures
+}
+
+// One POST to OCR.space with a single retry for TRANSIENT failures (network blip, 5xx/429,
+// "server busy"/timeout). Permanent errors (bad key, quota, file too large) are thrown
+// immediately with the server's message so the UI can explain and fall back to offline OCR.
+async function postToOcrSpace(blob, apiKey, retries) {
   const form = new FormData();
   form.append('apikey', apiKey || 'helloworld');
   form.append('language', 'ger');
@@ -124,10 +133,31 @@ export async function cloudRecognize(file, apiKey) {
   form.append('isOverlayRequired', 'true'); // needed for per-line coordinates
   form.append('file', blob, 'scan.jpg');
 
-  const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: form });
+  } catch (e) {
+    if (retries > 0) { await delay(900); return postToOcrSpace(blob, apiKey, retries - 1); }
+    throw new Error('network'); // no connection / CORS / DNS
+  }
+  if (!res.ok) {
+    if ((res.status === 429 || res.status >= 500) && retries > 0) {
+      await delay(900); return postToOcrSpace(blob, apiKey, retries - 1);
+    }
+    throw new Error(`HTTP ${res.status}`);
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    if (retries > 0) { await delay(900); return postToOcrSpace(blob, apiKey, retries - 1); }
+    throw new Error('bad response');
+  }
   if (data.IsErroredOnProcessing) {
     const msg = Array.isArray(data.ErrorMessage) ? data.ErrorMessage.join(' ') : (data.ErrorMessage || 'OCR error');
+    if (/busy|timed?\s*out|timeout/i.test(msg) && retries > 0) {
+      await delay(900); return postToOcrSpace(blob, apiKey, retries - 1);
+    }
     throw new Error(msg);
   }
   const results = data.ParsedResults || [];

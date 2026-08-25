@@ -600,6 +600,28 @@ async function renderSettings(main) {
 }
 
 // ---------- Import / Scan ----------
+// Map a raw OCR/network error to a short, human reason for the status line, so a failed scan
+// never shows a silent screen or a cryptic message. Falls back to the raw message if unknown.
+function ocrErrorReason(e) {
+  const m = (e && e.message ? String(e.message) : '').toLowerCase();
+  if (!navigator.onLine || m.includes('failed to fetch') || m.includes('networkerror') || m === 'network') {
+    return t('ocr_err_network');
+  }
+  if (m.includes('api key') || m.includes('apikey') || m.includes('invalid') || m.includes('unauthorized') || m.includes('403')) {
+    return t('ocr_err_key');
+  }
+  if (m.includes('limit') || m.includes('exceed') || m.includes('quota') || m.includes('too many') || m.includes('requests') || m.includes('429')) {
+    return t('ocr_err_limit');
+  }
+  if (m.includes('size') || m.includes('large') || m.includes('big') || m.includes('maximum') || m.includes('1024')) {
+    return t('ocr_err_size');
+  }
+  if (m.includes('busy') || m.includes('timed out') || m.includes('timeout') || m.includes('http 5')) {
+    return t('ocr_err_busy');
+  }
+  return (e && e.message) ? e.message : t('ocr_err_generic');
+}
+
 let importState = { type: 'parcel', rows: [] };
 // Local-only UI flags: whether each "?" explanation panel is expanded. Not persisted.
 let importHints = { cargo: false, ocr: false };
@@ -760,27 +782,46 @@ async function renderImport(main) {
   const instruction = el('p', { class: 'hint', text: t(hintKey) });
   const progress = el('p', { class: 'hint', id: 'ocr-status', text: '' }); // OCR status only
 
+  // Run the offline engine (Tesseract), reporting progress on the status line.
+  const recognizeOffline = (file) => recognize(file, (phase, p) => {
+    progress.textContent = phase === 'recognizing'
+      ? t('import_recognizing', { p: Math.round(p * 100) })
+      : t('import_loading_engine', { p: Math.round(p * 100) });
+  });
+
   // Shared handler for BOTH the camera and the file/screenshot pickers.
   const handleFile = async (f) => {
-    if (!f) return;
+    if (!f) { progress.textContent = t('import_no_file'); return; }
     let text = '';
     let lines = [];
+    let usedFallback = false;
     try {
       if (useCloud) {
         progress.textContent = t('import_recognizing_cloud');
         ({ text, lines } = await cloudRecognize(f, settings.ocrApiKey));
       } else {
         progress.textContent = t('import_loading_engine', { p: 0 });
-        ({ text, lines } = await recognize(f, (phase, p) => {
-          progress.textContent = phase === 'recognizing'
-            ? t('import_recognizing', { p: Math.round(p * 100) })
-            : t('import_loading_engine', { p: Math.round(p * 100) });
-        }));
+        ({ text, lines } = await recognizeOffline(f));
       }
     } catch (e) {
-      progress.textContent = (useCloud ? 'Cloud OCR: ' : 'OCR: ') + (e && e.message ? e.message : 'error');
-      return;
+      const reason = ocrErrorReason(e);
+      if (useCloud) {
+        // Cloud failed — say WHY, then automatically fall back to the offline engine so the
+        // courier still gets a result instead of a silent dead screen.
+        progress.textContent = t('import_cloud_failed', { reason }) + ' ' + t('import_trying_offline');
+        try {
+          ({ text, lines } = await recognizeOffline(f));
+          usedFallback = true;
+        } catch (e2) {
+          progress.textContent = t('import_ocr_failed', { reason: ocrErrorReason(e2) });
+          return;
+        }
+      } else {
+        progress.textContent = t('import_ocr_failed', { reason });
+        return;
+      }
     }
+    if (usedFallback) toast(t('import_used_offline'));
     // PARCEL photo = a LIST -> split into many addresses (by PLZ + visual gaps).
     // MAGAZINE/LETTER photo = ONE address. If the shot accidentally caught two,
     // split them and keep the TOP real address block — i.e. the topmost block that
