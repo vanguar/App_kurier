@@ -104,46 +104,6 @@ export async function resetSettings() {
   return getSettings();
 }
 
-// ---- route state (single source of truth for stop order) ----
-// Stored in the settings store under its own 'route' key so swapping current<->previous is
-// ONE atomic put and no DB-version bump is needed. Shape:
-//   { current: Route|null, previous: Route|null }
-//   Route = { order: [pointId], totalMeters, provider, manual: bool, computedAt }
-// `order` lists delivery-point ids only; Base is implicit (always first and last of the loop).
-// This replaces the legacy per-point `routeOrder`, which is now used only for a one-time migration.
-export async function getRouteState() {
-  const d = await db();
-  return (await d.get('settings', 'route')) || { current: null, previous: null };
-}
-
-export async function saveRouteState(state) {
-  const d = await db();
-  await d.put('settings', { current: null, previous: null, ...state }, 'route');
-  return state;
-}
-
-// One-time migration: if there is no routeState.current yet but points still carry the legacy
-// `routeOrder`, rebuild `current` from it so the saved order survives the upgrade. Idempotent —
-// once `current` exists this is a no-op, and `routeOrder` is never read as a source again.
-export async function migrateRouteState() {
-  const state = await getRouteState();
-  if (state.current) return state;
-  const points = await getPoints();
-  const ordered = points
-    .filter((p) => Number.isFinite(p.routeOrder))
-    .sort((a, b) => a.routeOrder - b.routeOrder);
-  if (!ordered.length) return state;
-  state.current = {
-    order: ordered.map((p) => p.id),
-    totalMeters: 0,
-    provider: 'legacy',
-    manual: false,
-    computedAt: Date.now(),
-  };
-  await saveRouteState(state);
-  return state;
-}
-
 // ---- points ----
 export async function getPoints() {
   const d = await db();

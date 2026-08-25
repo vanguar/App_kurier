@@ -4,13 +4,11 @@ import { t, setLang, getLang, resolveInitialLang, LANGS } from '../i18n/index.js
 import {
   getSettings, saveSettings, getPoints, putPoint, deletePoint, clearPoints,
   loadAddressIndex, indexCount, resetSettings,
-  getRouteState, saveRouteState, migrateRouteState,
 } from '../core/db.js';
 import { parseAddress } from '../core/normalizer.js';
 import { geocodeRaw, assessAddress, onlineGeocode, geocodeCenter, setGeoBounds, withinBounds, boundsActive } from '../core/geocode.js';
 import { addItemAtAddress, makeItem, itemTypeCounts, pointStatus, aggregateCounts, migratePointsV2, sameScannedPlace } from '../core/matching.js';
 import { computeRoute, orsOptimize, roadTrip, roadRoute } from '../core/route.js';
-import { orderByRoute, reorderStopsFromSaved, loopMeters, routeGeoSig } from '../core/route-order.js';
 import { autoResolveByNeighbors } from '../core/cluster.js';
 import { navigationUrl, pointHasPostalAddress, pointNavOptions } from '../core/navigation.js';
 import { recognize, cloudRecognize, splitAddresses, splitDeviceScreen, pickReceiverBlock, warmUp } from '../ocr/ocr.js';
@@ -79,8 +77,6 @@ export async function start() {
   applyGeoBounds(); // restrict online geocoding to the saved search area
   // v2/v3 identity migration: backfill canonicalId + merge legacy duplicate points.
   try { await migratePointsV2(); } catch (e) { console.warn('point migration skipped:', e); }
-  // Route history migration: fold the legacy per-point routeOrder into the unified routeState.
-  try { await migrateRouteState(); } catch (e) { console.warn('route migration skipped:', e); }
   // The v3 DB upgrade drops the old address index (its key layout changed). If the user
   // already had points but the index is now empty, ask them to reload their district file.
   if (settings.onboarded) {
@@ -601,12 +597,6 @@ async function renderSettings(main) {
 
   // Build stamp — lets you confirm the installed app updated to the latest version.
   main.appendChild(el('p', { class: 'hint center', text: `${t('settings_version')}: ${__BUILD__}` }));
-  // Developer credit + contact for feedback/suggestions.
-  main.appendChild(el('p', { class: 'hint center', text: `${t('settings_dev')}: @ObiVan1978` }));
-  main.appendChild(el('p', { class: 'hint center' }, [
-    document.createTextNode(`${t('settings_contact')}: `),
-    el('a', { href: 'https://t.me/ObiVan1978', target: '_blank', rel: 'noopener', text: 'Telegram @ObiVan1978' }),
-  ]));
 }
 
 // ---------- Import / Scan ----------
@@ -1094,7 +1084,6 @@ function renderReview() {
 // ---------- Points ----------
 async function renderPoints(main) {
   const points = await getPoints();
-  const routeState = await getRouteState();
   // The "ТОЧКИ ДОСТАВКИ" heading is gone — it only duplicated the active tab.
   main.appendChild(statsBar(points));
   if (!points.length) {
@@ -1112,8 +1101,9 @@ async function renderPoints(main) {
     }),
   ]));
 
-  const ordered = orderByRoute(points, routeState.current);
-  for (const p of ordered) {
+  points.sort((a, b) => (a.routeOrder ?? 1e9) - (b.routeOrder ?? 1e9) || a.createdAt - b.createdAt);
+
+  for (const p of points) {
     main.appendChild(pointCard(p));
   }
 }
@@ -1317,48 +1307,9 @@ async function renderRoute(main) {
   }
 
   const buildBtn = el('button', { class: 'btn primary big', text: t('route_build') });
-  // "Map" opens the graphical Leaflet view of the current order (numbered pins + a thin line).
-  // Editing stays in the list; the map only mirrors it and redraws live on manual reorder.
-  const mapBtn = el('button', {
-    class: 'btn map-btn', title: t('route_map_open'), 'aria-label': t('route_map_open'),
-    onclick: () => openRouteMap(),
-  }, [el('span', { class: 'map-btn-ico', text: '🗺️' }), el('span', { text: t('route_map_open') })]);
-  main.appendChild(el('div', { class: 'route-actions' }, [buildBtn, mapBtn]));
+  main.appendChild(buildBtn);
   const result = el('div', {});
   main.appendChild(result);
-
-  // Re-opening the tab shows the last saved route immediately (no need to rebuild).
-  const savedState = await getRouteState();
-  if (savedState.current) {
-    const points = await getPoints();
-    const cur = savedState.current;
-    const orderedIds = reorderStopsFromSaved(points, cur.order);
-    const delivered = points.filter((p) => p.coords && pointStatus(p) === 'done');
-    const skipped = points.filter((p) => !p.coords && pointStatus(p) !== 'done').length;
-    const byId = new Map(points.map((p) => [p.id, p]));
-
-    if (orderedIds.length) {
-      // The saved distance/provider only hold if the route's GEOMETRY is unchanged — same
-      // stops in the same order AND the same Base/stop coordinates. A stored geoSig captures
-      // all of that, so it also catches a corrected Base address or a GPS entrance saved on
-      // site (which move the line but not the id list). When it no longer matches we recompute
-      // the straight-line loop and flag the route as OUTDATED (rebuild needed), rather than
-      // pretending the stale order was optimized.
-      const displayed = orderedIds.map((id) => byId.get(id)).filter(Boolean);
-      const sig = routeGeoSig(settings.base?.coords, displayed);
-      const outdated = sig !== cur.geoSig || cur.provider === 'legacy' || !(cur.totalMeters > 0);
-      if (outdated) {
-        const meters = loopMeters(settings.base?.coords, displayed);
-        renderRouteResult(result, points, orderedIds, meters, skipped, 'straight', delivered, savedState.previous, false, true);
-      } else {
-        renderRouteResult(result, points, orderedIds, cur.totalMeters, skipped, cur.provider || 'straight', delivered, savedState.previous, !!cur.manual, false);
-      }
-    } else if (delivered.length) {
-      // Every stop is delivered — celebrate, but still list the done stops (dimmed).
-      result.appendChild(el('p', { class: 'route-sum', text: t('route_all_done') }));
-      renderDeliveredStops(result, delivered);
-    }
-  }
 
   buildBtn.addEventListener('click', async () => {
     if (buildBtn.disabled) return;
@@ -1494,22 +1445,14 @@ async function renderRoute(main) {
     if (!routed) routed = computeRoute(settings.base.coords, stops);
     const { orderedIds, totalMeters, provider = 'straight' } = routed;
 
-    // Persist into the unified routeState. A successful build pushes the old current onto
-    // previous (so "restore previous route" always has the last full route to swap back to),
-    // then stores the freshly computed order as current. `manual:false` = solver output.
-    const prevState = await getRouteState();
-    const byId = new Map(points.map((p) => [p.id, p]));
-    const newCurrent = {
-      order: orderedIds.slice(),
-      totalMeters,
-      provider,
-      manual: false,
-      computedAt: Date.now(),
-      geoSig: routeGeoSig(settings.base.coords, orderedIds.map((id) => byId.get(id)).filter(Boolean)),
-    };
-    await saveRouteState({ current: newCurrent, previous: prevState.current });
+    // persist routeOrder
+    const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
+    for (const p of points) {
+      p.routeOrder = orderMap.has(p.id) ? orderMap.get(p.id) : null;
+      await putPoint(p);
+    }
 
-      renderRouteResult(result, points, orderedIds, totalMeters, skippedNoCoord.length, provider, deliveredWithCoords, prevState.current, false, false);
+      renderRouteResult(result, points, orderedIds, totalMeters, skippedNoCoord.length, provider, deliveredWithCoords);
     } finally {
       buildBtn.disabled = false;
     }
@@ -1557,69 +1500,21 @@ function navSheet(coords, label, options = {}) {
   document.body.appendChild(overlay);
 }
 
-function renderRouteResult(result, points, orderedIds, totalMeters, skipped, provider, delivered = [], previous = null, manual = false, outdated = false) {
+function renderRouteResult(result, points, orderedIds, totalMeters, skipped, provider, delivered = []) {
   clear(result);
   const byId = new Map(points.map((p) => [p.id, p]));
   const km = (totalMeters / 1000).toFixed(1);
 
   result.appendChild(el('p', { class: 'route-sum', text: t('route_summary', { n: orderedIds.length, km }) }));
-  // Describe how the shown order was produced. `outdated` = the stop set or coordinates changed
-  // since the route was built, so the order was NOT re-optimized — we show a straight-line
-  // distance and prompt a rebuild. `manual` = the courier hand-reordered it. Otherwise report
-  // the solver that produced it.
-  const sourceText = outdated
-    ? t('route_by_outdated')
-    : (manual
-      ? t('route_by_manual')
-      : (provider === 'ors'
-        ? t('route_by_ors')
-        : (provider === 'osrm' ? t('route_by_road') : t('route_by_straight'))));
-  result.appendChild(el('p', { class: outdated ? 'warn' : 'hint', text: sourceText }));
-
-  // "Restore previous route" — available whenever a previous saved order exists. Restoring
-  // SWAPS current<->previous, so an accidental restore can itself be undone the same way.
-  if (previous && Array.isArray(previous.order) && previous.order.length) {
-    result.appendChild(el('button', {
-      class: 'btn sm route-restore', text: '↩ ' + t('route_restore_prev'),
-      onclick: async () => {
-        const st = await getRouteState();
-        await saveRouteState({ current: st.previous, previous: st.current });
-        render();
-      },
-    }));
-  }
-
-  // Hint: press-and-hold a stop to drag it up/down (the list is the single place to edit
-  // order; the map only mirrors it).
-  if (orderedIds.length > 1) {
-    result.appendChild(el('p', { class: 'hint reorder-hint', text: '↕ ' + t('route_reorder_hint') }));
-  }
-
+  const sourceText = provider === 'ors'
+    ? t('route_by_ors')
+    : (provider === 'osrm' ? t('route_by_road') : t('route_by_straight'));
+  result.appendChild(el('p', { class: 'hint', text: sourceText }));
   result.appendChild(el('div', { class: 'stop base', text: `🏁 ${t('route_base')}` }));
 
-  const list = el('div', { class: 'stops-list' });
   orderedIds.forEach((id, i) => {
     const p = byId.get(id);
-    list.appendChild(stopButton(p, String(i + 1)));
-  });
-  result.appendChild(list);
-
-  // Press-and-hold drag reorder. On drop we recompute the loop length by straight-line
-  // (a hand-reordered route no longer matches the road solver) and save it as the new
-  // current WITHOUT touching `previous`, so "restore previous route" still points at the
-  // last solver build. Then re-render (renumbers stops and redraws the map if open).
-  enableDragReorder(list, async (newIds) => {
-    const base = settings.base?.coords;
-    const orderedPts = newIds.map((id) => byId.get(id)).filter(Boolean);
-    const meters = loopMeters(base, orderedPts);
-    const st = await getRouteState();
-    const newCurrent = {
-      order: newIds.slice(), totalMeters: meters, provider: 'straight', manual: true,
-      computedAt: Date.now(), geoSig: routeGeoSig(base, orderedPts),
-    };
-    await saveRouteState({ current: newCurrent, previous: st.previous });
-    renderRouteResult(result, points, newIds, meters, skipped, 'straight', delivered, st.previous, true, false);
-    updateRouteMap(orderedPts);
+    result.appendChild(stopButton(p, String(i + 1)));
   });
 
   result.appendChild(el('div', { class: 'stop base', text: `🏁 ${t('route_base_end')}` }));
@@ -1627,141 +1522,6 @@ function renderRouteResult(result, points, orderedIds, totalMeters, skipped, pro
     result.appendChild(el('p', { class: 'warn', text: t('route_skipped', { n: skipped }) }));
   }
   renderDeliveredStops(result, delivered);
-}
-
-// Drag-to-reorder for the stop list, initiated from a dedicated side handle. Uses Pointer
-// Events where available and falls back to Touch events for very old firmware. Deliberately
-// NOT HTML5 drag-and-drop (unreliable on Android WebView).
-//
-// The handle carries `touch-action: none` in CSS, so scrolling is disabled for gestures
-// starting on it from the very first touch — the reliable way per the Pointer Events spec
-// (flipping touch-action after a long-press can be ignored once the browser has decided the
-// gesture is a scroll). A short hold (or a small movement) arms the drag and reveals the
-// pulsing arrow hint; because dragging starts on the handle and the address body is a separate
-// element, a tap on the address still opens navigation with no ambiguity.
-function enableDragReorder(list, onReorder) {
-  const HOLD_MS = 180;    // brief hold to reveal the hint; movement also arms immediately
-  const MOVE_ARM = 6;     // px of movement on the handle that means "start dragging now"
-  let dragging = null;
-  let pending = null;     // stop awaiting the hold timer
-  let holdTimer = null;
-  let armed = false;
-  let startY = 0, startX = 0;
-  let activeId = null;
-  let orderAtArm = null;  // stop ids when the drag armed — to detect "held but not moved"
-
-  const stops = () => Array.from(list.children).filter((n) => n.classList && n.classList.contains('stop'));
-  const idsOf = () => stops().map((e) => e.getAttribute('data-pid'));
-  const sameOrder = (a, b) => a && b && a.length === b.length && a.every((id, i) => id === b[i]);
-
-  function markEnds() {
-    const els = stops();
-    els.forEach((e) => e.classList.remove('at-top', 'at-bottom'));
-    if (!dragging) return;
-    if (dragging === els[0]) dragging.classList.add('at-top');
-    if (dragging === els[els.length - 1]) dragging.classList.add('at-bottom');
-  }
-
-  function arm(stop) {
-    if (armed || !stop) return;
-    armed = true;
-    dragging = stop;
-    orderAtArm = idsOf();
-    stop.classList.add('dragging');
-    markEnds();
-    if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) { /* ignore */ } }
-  }
-
-  function moveTo(clientY) {
-    const others = stops().filter((e) => e !== dragging);
-    let before = null;
-    for (const e of others) {
-      const r = e.getBoundingClientRect();
-      if (clientY < r.top + r.height / 2) { before = e; break; }
-    }
-    if (before) list.insertBefore(dragging, before);
-    else list.appendChild(dragging);
-    markEnds();
-  }
-
-  function cleanup() {
-    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-    if (dragging) dragging.classList.remove('dragging', 'at-top', 'at-bottom');
-    dragging = null;
-    pending = null;
-    armed = false;
-    activeId = null;
-    orderAtArm = null;
-  }
-
-  function finish(commit) {
-    // Only report a reorder when the order ACTUALLY changed. A plain press-and-hold (to peek at
-    // the arrows) then release must not rewrite the route — otherwise it would needlessly flip
-    // it to "manually changed" and replace the real road distance with a straight-line one.
-    let ids = null;
-    if (armed && commit) {
-      const now = idsOf();
-      if (!sameOrder(now, orderAtArm)) ids = now;
-    }
-    cleanup();
-    if (ids) onReorder(ids);
-  }
-
-  function onDown(clientX, clientY, target, id) {
-    const handle = target.closest && target.closest('.drag-handle');
-    if (!handle || !list.contains(handle)) return false;
-    const stop = handle.closest('.stop');
-    if (!stop) return false;
-    pending = stop;
-    activeId = id;
-    startX = clientX; startY = clientY;
-    holdTimer = setTimeout(() => arm(pending), HOLD_MS);
-    return true;
-  }
-  function onMove(clientX, clientY, ev) {
-    if (!armed) {
-      if (pending && (Math.abs(clientY - startY) > MOVE_ARM || Math.abs(clientX - startX) > MOVE_ARM)) {
-        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-        arm(pending);
-      }
-      if (!armed) return;
-    }
-    if (ev.cancelable) ev.preventDefault();
-    moveTo(clientY);
-  }
-
-  if (window.PointerEvent) {
-    list.addEventListener('pointerdown', (ev) => {
-      if (ev.pointerType === 'mouse' && ev.button !== 0) return;
-      const handle = ev.target.closest && ev.target.closest('.drag-handle');
-      if (!handle) return;
-      if (onDown(ev.clientX, ev.clientY, ev.target, ev.pointerId)) {
-        try { handle.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
-      }
-    });
-    list.addEventListener('pointermove', (ev) => {
-      if (ev.pointerId !== activeId) return;
-      onMove(ev.clientX, ev.clientY, ev);
-    });
-    list.addEventListener('pointerup', (ev) => { if (ev.pointerId === activeId) finish(true); });
-    list.addEventListener('pointercancel', (ev) => { if (ev.pointerId === activeId) finish(false); });
-  } else {
-    // Old-firmware fallback: Touch events. passive:false so preventDefault can stop scroll.
-    list.addEventListener('touchstart', (ev) => {
-      const tch = ev.changedTouches[0];
-      onDown(tch.clientX, tch.clientY, ev.target, tch.identifier);
-    }, { passive: true });
-    list.addEventListener('touchmove', (ev) => {
-      const tch = ev.changedTouches[0];
-      if (tch.identifier !== activeId) return;
-      onMove(tch.clientX, tch.clientY, ev);
-    }, { passive: false });
-    list.addEventListener('touchend', (ev) => {
-      const tch = ev.changedTouches[0];
-      if (tch.identifier === activeId) finish(true);
-    });
-    list.addEventListener('touchcancel', () => finish(false));
-  }
 }
 
 // Build one route stop as a BLOCK per address: a tappable header (opens the
@@ -1802,75 +1562,7 @@ function stopButton(p, indexLabel) {
     }),
   );
 
-  // Dedicated drag handle on the side. It carries `touch-action: none` (in CSS) so the browser
-  // knows from the very first touch that a gesture starting here must NOT scroll the page —
-  // switching touch-action after a long-press is unreliable per the Pointer Events spec. A grip
-  // glyph shows it's draggable; while held/dragged it reveals a pulsing move hint. The middle of
-  // the list alternates ▲/▼ (both directions possible); the top stop shows only ▼ and the bottom
-  // only ▲, driven by CSS via the .at-top/.at-bottom classes the drag handler toggles.
-  // Not a real button (no keyboard action), so no button role/tabindex — just a labelled grip.
-  const handle = el('div', {
-    class: 'drag-handle', 'aria-label': t('route_reorder_hint'),
-  }, [
-    el('span', { class: 'grip', 'aria-hidden': 'true', text: '⠿' }),
-    el('div', { class: 'drag-arrows', 'aria-hidden': 'true' }, [
-      el('span', { class: 'arr arr-up', text: '▲' }),
-      el('span', { class: 'arr arr-down', text: '▼' }),
-    ]),
-  ]);
-
-  const stopMain = el('div', { class: 'stop-main' }, [head, items]);
-  return el('div', { class: 'stop' + (done ? ' done' : ''), 'data-pid': p.id }, [stopMain, handle]);
-}
-
-// Redraw the route line + numbered markers when the order changes. A no-op until the map
-// widget is opened (implemented with the Leaflet map); kept as a stable hook so the drag
-// handler doesn't need to know whether the map is currently visible. `fit:false` keeps the
-// courier's current pan/zoom while the order changes under them.
-function updateRouteMap(orderedPoints) {
-  if (_routeMap && typeof _routeMap.update === 'function') _routeMap.update(orderedPoints, false);
-}
-let _routeMap = null;
-
-// Open the full-screen graphical map of the current route. Leaflet is dynamically imported so
-// it (and its CSS) only load when the courier actually opens the map.
-async function openRouteMap() {
-  const base = settings.base?.coords;
-  const points = await getPoints();
-  const st = await getRouteState();
-  const orderedIds = st.current ? reorderStopsFromSaved(points, st.current.order) : [];
-  const byId = new Map(points.map((p) => [p.id, p]));
-  const ordered = orderedIds.map((id) => byId.get(id)).filter((p) => p && p.coords);
-
-  if (!ordered.length) { toast(t('route_need_points')); return; }
-
-  const mapEl = el('div', { class: 'route-map' });
-  const overlay = el('div', { class: 'map-overlay' }, [
-    el('div', { class: 'map-bar' }, [
-      el('span', { class: 'map-title', text: t('route_map_title') }),
-      el('button', { class: 'btn sm', text: '✕ ' + t('close'), onclick: () => close() }),
-    ]),
-    mapEl,
-  ]);
-  document.body.appendChild(overlay);
-
-  function close() {
-    if (_routeMap && typeof _routeMap.destroy === 'function') _routeMap.destroy();
-    _routeMap = null;
-    overlay.remove();
-  }
-
-  try {
-    const { createRouteMap } = await import('./routeMap.js');
-    _routeMap = createRouteMap(mapEl, base);
-    _routeMap.update(ordered, true); // first draw fits all pins
-    // Leaflet needs a size recalc once the container has been laid out in the DOM.
-    setTimeout(() => { if (_routeMap) _routeMap.invalidate(); }, 60);
-  } catch (e) {
-    console.warn('map failed to load:', e);
-    close();
-    toast(t('route_map_open') + ' — ✕');
-  }
+  return el('div', { class: 'stop' + (done ? ' done' : '') }, [head, items]);
 }
 
 // Dimmed section listing already-delivered stops (kept visible for orientation).
