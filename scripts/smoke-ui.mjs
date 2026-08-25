@@ -14,12 +14,17 @@ const result = await build({
   stdin: {
     contents: `
       export { start } from './src/ui/app.js';
-      export { saveSettings, putPoint } from './src/core/db.js';
+      export { saveSettings, putPoint, saveRouteState } from './src/core/db.js';
+      export { routeGeoSig } from './src/core/route-order.js';
     `,
     resolveDir: process.cwd(),
     loader: 'js',
   },
   bundle: true, format: 'esm', platform: 'browser', write: false,
+  // The map view (Leaflet) is only ever dynamically imported at runtime, but esbuild still
+  // follows the dynamic import when bundling. Leaflet pulls in CSS + PNG assets that this
+  // headless harness has no loader for and never needs, so map them to empty modules.
+  loader: { '.css': 'empty', '.png': 'empty', '.svg': 'empty' },
   define: {
     __BUILD__: '"smoke"',
     'import.meta.env': '{"BASE_URL":"/","VITE_ORS_PROXY_URL":"","DEV":false,"PROD":true,"MODE":"test"}',
@@ -99,6 +104,55 @@ await check('#/points renders a point card', async () => {
   hashTo('#/points'); await wait(40);
   if (!document.querySelector('.point')) throw new Error('point card missing');
   if (!document.querySelector('.statsbar .stat-val')) throw new Error('counters missing');
+});
+await check('#/route renders saved route (list + Map button + drag stops)', async () => {
+  await mod.putPoint({ id: 'p2', canonicalId: 'y', matchKey: 'y', createdAt: Date.now() + 1,
+    address: { raw: 'Seestr 2', display: 'Seestr 2', postcode: '17033', city: 'Neubrandenburg' },
+    coords: { lat: 53.6, lng: 13.3 }, items: [{ id: 'i2', type: 'letter', status: 'pending' }] });
+  const base = { lat: 53.9, lng: 13.0 };
+  const p1 = { id: 'p1', coords: { lat: 53.5, lng: 13.2 } };
+  const p2 = { id: 'p2', coords: { lat: 53.6, lng: 13.3 } };
+  await mod.saveRouteState({
+    current: { order: ['p1', 'p2'], totalMeters: 1234, provider: 'osrm', manual: false, computedAt: Date.now(),
+      geoSig: mod.routeGeoSig(base, [p1, p2]) },
+    previous: { order: ['p2', 'p1'], totalMeters: 2000, provider: 'osrm', manual: false, computedAt: Date.now() },
+  });
+  hashTo('#/route'); await wait(60);
+  if (!document.querySelector('.route-actions .map-btn')) throw new Error('Map button missing');
+  const stops = document.querySelectorAll('.stops-list .stop[data-pid]');
+  if (stops.length !== 2) throw new Error(`expected 2 draggable stops, got ${stops.length}`);
+  if (document.querySelectorAll('.stops-list .stop .drag-handle').length !== 2) throw new Error('per-stop drag handle missing');
+  if (!document.querySelector('.drag-handle .drag-arrows')) throw new Error('drag arrows hint missing');
+  if (!document.querySelector('.route-restore')) throw new Error('restore-previous button missing (previous exists)');
+  // geoSig matches -> route reported as the solver output (road), not "manual"/"outdated"
+  const src = document.querySelector('.route-sum + p');
+  if (src && /вручную|устар/i.test(src.textContent)) throw new Error('fresh route mislabelled as manual/outdated');
+});
+await check('#/route flags OUTDATED distance when a coordinate changed', async () => {
+  // Save a route whose geoSig no longer matches the current point coords (simulates a corrected
+  // Base or a GPS entrance saved on site): distance must be recomputed and the route flagged.
+  await mod.saveRouteState({
+    current: { order: ['p1', 'p2'], totalMeters: 1234, provider: 'osrm', manual: false, computedAt: Date.now(),
+      geoSig: 'STALE-SIGNATURE' },
+    previous: null,
+  });
+  hashTo('#/points'); await wait(20);
+  hashTo('#/route'); await wait(60);
+  const warn = [...document.querySelectorAll('.warn')].some((e) => /устар|линии прямой|прямой/i.test(e.textContent));
+  if (!warn) throw new Error('outdated route not flagged after coordinate change');
+});
+await check('#/route shows "all done" when every stop is delivered', async () => {
+  await mod.putPoint({ id: 'p1', canonicalId: 'x', matchKey: 'x', createdAt: Date.now(),
+    address: { raw: 'Hauptstr 1', display: 'Hauptstr 1', postcode: '17033', city: 'Neubrandenburg' },
+    coords: { lat: 53.5, lng: 13.2 }, items: [{ id: 'i1', type: 'parcel', status: 'delivered' }] });
+  await mod.putPoint({ id: 'p2', canonicalId: 'y', matchKey: 'y', createdAt: Date.now() + 1,
+    address: { raw: 'Seestr 2', display: 'Seestr 2', postcode: '17033', city: 'Neubrandenburg' },
+    coords: { lat: 53.6, lng: 13.3 }, items: [{ id: 'i2', type: 'letter', status: 'delivered' }] });
+  hashTo('#/points'); await wait(20); // leave and re-enter route to force a fresh render
+  hashTo('#/route'); await wait(60);
+  if (document.querySelector('.stops-list .stop[data-pid]')) throw new Error('no active stops should render');
+  const sum = document.querySelector('.route-sum');
+  if (!sum) throw new Error('"all done" summary missing (blank route screen)');
 });
 
 await wait(60);
